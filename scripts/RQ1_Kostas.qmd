@@ -3,3 +3,8 @@ title: "RQ1_Kostas"
 format: html
 ---
 
+## Preparation and exploration of data
+
+```{r}
+
+```
