@@ -5,6 +5,12 @@ format: html
 
 ## Preparation and exploration of data
 
-```{r}
+load data
 
+```{r}
+counts_df <- readRDS("../data/counts_df.rds")
+tpm_df <- readRDS("../data/tpm_df.rds")
+clinical_df <- readRDS("../data/clinical_df.rds")
 ```
+
+f
