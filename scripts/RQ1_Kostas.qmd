@@ -13,4 +13,18 @@ tpm_df <- readRDS("../data/tpm_df.rds")
 clinical_df <- readRDS("../data/clinical_df.rds")
 ```
 
-f
+explore the data
+
+```{r}
+sum(is.na(counts_df))
+colSums(is.na(clinical_df))
+identical(colnames(counts_df),clinical_df$sample_id)
+table(clinical_df$BOR)
+summary(as.numeric(as.matrix(counts_df)))
+```
+
+make a histogram with raw data
+
+```{r}
+
+```
