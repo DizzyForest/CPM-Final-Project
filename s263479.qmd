@@ -24,3 +24,23 @@ You can add options to executable code like this
 ```
 
 The `echo: false` option disables the printing of code (only output is displayed).
+
+# Loading Data
+
+Loading metadata
+
+```{r}
+clinical_df <- readRDS("data/clinical_df.rds")
+```
+
+Loading raw counts
+
+```{r}
+counts_df <- readRDS("data/counts_df.rds")
+```
+
+Loading tpm
+
+```{r}
+tpm_df <- readRDS("data/tpm_df.rds")
+```
