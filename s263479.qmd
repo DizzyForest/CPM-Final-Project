@@ -211,6 +211,14 @@ ranked_genes <- result$stat #extracting the stat column
 names(ranked_genes) <- rownames(result)  #assigns gene names to the values stored in ranked_genes
 
 ranked_genes <- ranked_genes[!is.na(ranked_genes)] #removing missing values
+
+```
+
+```{r}
+ranked_genes <- ranked_genes[
+  !is.na(names(ranked_genes)) &
+  names(ranked_genes) != ""
+]
 ```
 
 Quality check for ties
@@ -223,4 +231,22 @@ ranked_genes |>
     non_zero_ties = sum(duplicated(stat)),
     total = n(),
     pct_formatted = sprintf("%.5f%%", mean(duplicated(stat)) * 100))
+```
+
+```{r}
+sum(names(ranked_genes) == "")
+```
+
+## **Run fgsea against MSigDB gene sets**
+
+```{r}
+gene_sets <- msigdbr(species = "Homo sapiens", collection = "C5", subcollection = "BP") # molecular signature database
+gene_sets <- split(x = gene_sets$gene_symbol, f = gene_sets$gs_name) # we need a list for fsea
+```
+
+```{r}
+set.seed(42) # reproducible permutations
+fgsea_res <- fgsea(pathways = gene_sets,
+                   stats = ranked_genes, # stats: gene names for GSEA
+                   nPermSimple = 10000) #resolve more pathway p-values
 ```
