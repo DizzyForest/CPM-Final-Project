@@ -61,3 +61,39 @@ library(msigdbr)
 library(dplyr)
 library(tidyr)
 ```
+
+# Familiarizing with data
+
+**Count data**
+
+```{r}
+head(counts_df)
+```
+
+```{r}
+dim(counts_df)
+```
+
+**Clinical data**
+
+```{r}
+head(clinical_df)
+```
+
+```{r}
+dim(clinical_df)
+```
+
+Count data and clinical data have the same number of samples
+
+```{r}
+colnames(clinical_df)
+```
+
+-   Patient ID A unique identifier assigned to each patient.
+
+-   BOR Best Overall Response Describes how well a patient's cancer responded to treatment.
+
+-   TMB Tumor Mutational Burden Measures the number of mutations in a tumor, usually expressed as mutations per megabase (mut/Mb).
+
+-   sample_id Sample ID A unique identifier for a biological sample collected from a patient
