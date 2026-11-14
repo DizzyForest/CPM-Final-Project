@@ -250,3 +250,39 @@ fgsea_res <- fgsea(pathways = gene_sets,
                    stats = ranked_genes, # stats: gene names for GSEA
                    nPermSimple = 10000) #resolve more pathway p-values
 ```
+
+## Visualize enrichment
+
+### Bar plot
+
+```{r}
+topPathways <- fgsea_res  |>
+  dplyr::arrange(padj) |>
+  dplyr::slice(1:5)
+
+ggplot(topPathways,
+       mapping = aes(x = reorder(pathway, NES),
+                     y = NES)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = "Pathway",
+       y = "Normalized Enrichment Score (NES)",
+       title = "Top 5 Enriched Pathways") +
+  theme_minimal()
+```
+
+### GSEA Table
+
+```{r}
+number_of_top_pathways_up <- 10
+number_of_top_pathways_down <- 10
+
+topPathwaysUp <- fgsea_res[ES > 0][head(order(pval), n = number_of_top_pathways_up), pathway]
+topPathwaysDown <- fgsea_res[ES < 0][head(order(pval), n = number_of_top_pathways_down), pathway]
+topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
+```
+
+```{r}
+## To show the plot inline you can call plotGseaTable() without pdf()/png()
+plotGseaTable(gene_sets[topPathways], stats = ranked_genes, fgseaRes = fgsea_res, gseaParam = 0.5)
+```
