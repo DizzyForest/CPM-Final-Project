@@ -97,3 +97,11 @@ colnames(clinical_df)
 -   TMB Tumor Mutational Burden Measures the number of mutations in a tumor, usually expressed as mutations per megabase (mut/Mb).
 
 -   sample_id Sample ID A unique identifier for a biological sample collected from a patient
+
+# Filter to overlapping samples
+
+```{r}
+all(clinical_df$sample_id == colnames(counts_df))
+```
+
+The sample id-s from the two datasets are in order
