@@ -121,3 +121,40 @@ levels(clinical_df$BOR)
 ```{r}
 table(clinical_df$BOR)
 ```
+
+# **Build the DESeq2 dataset and run the differential expression analysis**
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = counts_df,
+                              colData = clinical_df, 
+                              design = ~ BOR)
+```
+
+Remove low-expression genes
+
+```{r}
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,] 
+```
+
+```{r}
+sum(!keep)   # Number of genes removed
+```
+
+```{r}
+sum(keep)    # Number of genes retained
+```
+
+Differential gene expression analysis
+
+```{r}
+dds <- DESeq(dds)
+```
+
+```{r}
+result <- results(dds)
+```
+
+```{r}
+resultsNames(dds)
+```
