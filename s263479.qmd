@@ -158,3 +158,21 @@ result <- results(dds)
 ```{r}
 resultsNames(dds)
 ```
+
+## **Explore the results and choose a significance threshold**
+
+```{r}
+summary(result)
+```
+
+Re-run results() with a treshold 0.05
+
+```{r}
+result <- results(dds, alpha = 0.05)
+```
+
+```{r}
+summary(result)
+```
+
+The second threshold is more stringent, meaning fewer genes are considered statistically significant.
