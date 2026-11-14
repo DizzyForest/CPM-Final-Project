@@ -176,3 +176,29 @@ summary(result)
 ```
 
 The second threshold is more stringent, meaning fewer genes are considered statistically significant.
+
+# Volcano Plot
+
+```{r}
+res_df <- as_data_frame(result) |>
+  mutate(significant = padj < 0.05)
+```
+
+```{r}
+ggplot(res_df,
+       mapping = aes(x = log2FoldChange,
+                     y = -log10(padj),
+                     color = significant)) +
+  geom_point() +
+  scale_color_manual(values = c("grey", "limegreen")) +
+  labs(x = "Log2 Fold Change",
+       y = "-Log10 Adjusted P-value",
+       title = "Volcano Plot") +
+  theme_minimal()
+```
+
+Heat map
+
+```{r}
+library(pheatmap)
+```
