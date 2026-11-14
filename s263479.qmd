@@ -105,3 +105,19 @@ all(clinical_df$sample_id == colnames(counts_df))
 ```
 
 The sample id-s from the two datasets are in order
+
+# Converting BOR
+
+Converting BOR into factor
+
+```{r}
+clinical_df$BOR <- as.factor(clinical_df$BOR)
+```
+
+```{r}
+levels(clinical_df$BOR)
+```
+
+```{r}
+table(clinical_df$BOR)
+```
