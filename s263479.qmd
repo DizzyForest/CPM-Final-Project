@@ -202,3 +202,25 @@ Heat map
 ```{r}
 library(pheatmap)
 ```
+
+# Rank genes for GSEA
+
+```{r}
+ranked_genes <- result$stat #extracting the stat column
+
+names(ranked_genes) <- rownames(result)  #assigns gene names to the values stored in ranked_genes
+
+ranked_genes <- ranked_genes[!is.na(ranked_genes)] #removing missing values
+```
+
+Quality check for ties
+
+```{r}
+ranked_genes |>
+  enframe(name = "gene", value = "stat") |> # enframe turns a vector into a dataframe so you can use tidy syntax and methods on it
+  filter(!is.na(stat), stat != 0) |>
+  summarise(
+    non_zero_ties = sum(duplicated(stat)),
+    total = n(),
+    pct_formatted = sprintf("%.5f%%", mean(duplicated(stat)) * 100))
+```
