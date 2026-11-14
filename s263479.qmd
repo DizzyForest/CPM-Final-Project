@@ -44,3 +44,20 @@ Loading tpm
 ```{r}
 tpm_df <- readRDS("data/tpm_df.rds")
 ```
+
+# Set up
+
+```{r}
+gc()
+```
+
+Loading libraries
+
+```{r}
+library(tidyverse)
+library(DESeq2)
+library(fgsea)
+library(msigdbr)
+library(dplyr)
+library(tidyr)
+```
