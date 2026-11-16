@@ -1,0 +1,216 @@
+---
+title: "RQ3_script"
+format: html
+editor: visual
+---
+
+## Research Question
+
+How do PD-1 (PDCD1) expression, the T-cell-inflamed GEP score and tumor mutational burden (TMB) compare in their association with response to anti-PD-L1 treatment?
+
+Biological framing: PDCD1 and the GEP score are both RNA read-outs of pre-existing T-cell immunity in the tumor (one gene vs. an 18-gene average). TMB is a DNA read-out of tumor antigenicity. We therefore ask (1) whether each marker differs between responders and non-responders, (2) in which direction and how strongly, and (3) whether the markers carry the same or different information.
+
+## Step 1: Load data and build one table
+
+We reuse the GEP score saved by RQ2 (run `RQ2_code.qmd` first), so that RQ2 and RQ3 use exactly the same samples and the same score.
+
+```{r}
+library(ggplot2)
+library(pROC)
+
+imvigor  <- readRDS("IMvigor210_plain.rds")
+tpm      <- as.matrix(imvigor$tpm)
+clinical <- as.data.frame(imvigor$clinical)
+rq2      <- readRDS("RQ2_results/RQ2_GEP_and_ssGSEA_scores_for_RQ3.rds")
+
+stopifnot(
+  "PDCD1" %in% rownames(tpm),
+  "TMB" %in% names(clinical),
+  !anyDuplicated(rq2$sample_id),
+  all(rq2$sample_id %in% colnames(tpm)),
+  all(rq2$sample_id %in% clinical$sample_id),
+  all(rq2$BOR %in% c("NR", "R"))
+)
+
+tmb_raw <- as.numeric(clinical$TMB[match(rq2$sample_id, clinical$sample_id)])
+
+d <- data.frame(
+  sample_id = rq2$sample_id,
+  Response  = factor(rq2$BOR, levels = c("NR", "R")),
+  PDCD1     = log2(as.numeric(tpm["PDCD1", rq2$sample_id]) + 1),
+  GEP       = rq2$GEP_score,
+  TMB       = log2(tmb_raw + 1)   # NA stays NA: missing is not zero
+)
+
+markers <- c(
+  PDCD1 = "PDCD1, log2(TPM + 1)",
+  GEP   = "T-cell-inflamed GEP score",
+  TMB   = "TMB, log2(mut/Mb + 1)"
+)
+
+# How many samples per group, and how many have TMB?
+print(table(d$Response))
+print(table(Response = d$Response, TMB_available = !is.na(d$TMB)))
+```
+
+## Step 2: Distributions in responders and non-responders
+
+The log2 scale is used only for display. The Wilcoxon test and the AUC below are rank-based, so they give the same result on the raw scale.
+
+```{r}
+#| fig-width: 10
+#| fig-height: 4.5
+#| fig-cap: "Each biomarker by best overall response. Each point is one patient; boxes show the median and interquartile range. Group sizes differ for TMB because of missing values."
+
+long <- do.call(rbind, lapply(names(markers), function(m) {
+  ok <- !is.na(d[[m]])
+  data.frame(
+    Response = d$Response[ok],
+    value    = d[[m]][ok],
+    panel    = sprintf("%s\nNR n = %d, R n = %d", markers[[m]],
+                       sum(d$Response[ok] == "NR"), sum(d$Response[ok] == "R"))
+  )
+}))
+long$panel <- factor(long$panel, levels = unique(long$panel))
+
+p_box <- ggplot(long, aes(x = Response, y = value, fill = Response)) +
+  geom_boxplot(width = 0.55, alpha = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.13, alpha = 0.55, size = 1.6) +
+  facet_wrap(~ panel, scales = "free_y") +
+  scale_fill_manual(values = c(NR = "#F4A09C", R = "#58C8CD")) +
+  labs(x = "Best overall response", y = NULL) +
+  theme_classic(base_size = 12) +
+  guides(fill = "none")
+print(p_box)
+
+dir.create("RQ3_results", showWarnings = FALSE)
+ggsave("RQ3_results/biomarkers_by_response.png", p_box,
+       width = 10, height = 4.5, dpi = 300)
+```
+
+## Step 3: Test and effect size for each biomarker
+
+For each biomarker we report:
+
+-   the Wilcoxon rank-sum p-value (is there a difference?);
+-   the AUC with a 95% confidence interval (direction and magnitude).
+
+The AUC here is the probability that a randomly chosen responder has a higher value than a randomly chosen non-responder. 0.5 means no difference, above 0.5 means higher in responders, below 0.5 means higher in non-responders. It has no units, so it can be compared across the three biomarkers. It is the same quantity as the rank-biserial correlation (r = 2 x AUC - 1).
+
+```{r}
+assoc <- function(data, set) {
+  do.call(rbind, lapply(names(markers), function(m) {
+    ok <- !is.na(data[[m]])
+    x  <- data[[m]][ok]
+    g  <- data$Response[ok]
+    # direction is fixed (higher = responder), so AUC can fall below 0.5
+    r  <- roc(g, x, levels = c("NR", "R"), direction = "<", quiet = TRUE)
+    ci <- as.numeric(ci.auc(r))
+    data.frame(
+      set       = set,
+      marker    = m,
+      n_NR      = sum(g == "NR"),
+      n_R       = sum(g == "R"),
+      median_NR = median(x[g == "NR"]),
+      median_R  = median(x[g == "R"]),
+      AUC       = ci[2],
+      AUC_low   = ci[1],
+      AUC_high  = ci[3],
+      p_value   = wilcox.test(x ~ g, exact = FALSE)$p.value
+    )
+  }))
+}
+
+# Main analysis: every patient with a value for that biomarker.
+res_all <- assoc(d, "All available patients")
+res_all$p_holm <- p.adjust(res_all$p_value, method = "holm")
+
+# Sensitivity analysis: the same patients for all three biomarkers.
+d_cc   <- d[complete.cases(d[, names(markers)]), ]
+res_cc <- assoc(d_cc, "Patients with all three biomarkers")
+res_cc$p_holm <- p.adjust(res_cc$p_value, method = "holm")
+
+res <- rbind(res_all, res_cc)
+print(res, digits = 3, row.names = FALSE)
+write.csv(res, "RQ3_results/RQ3_statistical_summary.csv", row.names = FALSE)
+```
+
+```{r}
+#| fig-width: 7.5
+#| fig-height: 3.8
+#| fig-cap: "Strength of association with response. Points are AUCs, bars are 95% confidence intervals; the dashed line marks no association."
+
+res$marker <- factor(res$marker, levels = rev(names(markers)))
+
+p_auc <- ggplot(res, aes(x = AUC, y = marker, colour = set)) +
+  geom_vline(xintercept = 0.5, linetype = "dashed", colour = "grey50") +
+  geom_pointrange(aes(xmin = AUC_low, xmax = AUC_high),
+                  position = position_dodge(width = 0.5)) +
+  scale_colour_manual(values = c("black", "grey55"), name = NULL) +
+  coord_cartesian(xlim = c(0.3, 1)) +
+  labs(x = "AUC (probability that a responder has the higher value)", y = NULL) +
+  theme_classic(base_size = 12) +
+  theme(legend.position = "bottom")
+print(p_auc)
+
+ggsave("RQ3_results/biomarker_effect_sizes.png", p_auc,
+       width = 7.5, height = 3.8, dpi = 300)
+```
+
+## Step 4: Do the biomarkers carry the same information?
+
+If PDCD1 and the GEP score are strongly correlated, they measure the same biology. If TMB is only weakly correlated with them, it measures something different.
+
+```{r}
+print(round(cor(d[, names(markers)], method = "spearman",
+                use = "pairwise.complete.obs"), 2))
+
+print(cor.test(d$PDCD1, d$GEP, method = "spearman", exact = FALSE))
+print(cor.test(d$GEP,   d$TMB, method = "spearman", exact = FALSE))
+```
+
+## Step 5: Does TMB add information beyond the GEP score?
+
+Logistic regression of response on GEP and TMB together, in patients who have both. Each odds ratio is per one standard deviation, with the other marker held constant. PDCD1 is left out because it measures the same axis as GEP (see Step 4).
+
+This model is only reliable if the smaller response group is large enough (rule of thumb: at least 10 patients per variable, so at least 20 here). Check the group sizes printed below before interpreting it.
+
+```{r}
+print(table(d_cc$Response))
+
+fit <- glm(Response ~ scale(GEP) + scale(TMB), data = d_cc, family = binomial)
+
+or_table <- exp(cbind(OR = coef(fit), suppressMessages(confint(fit))))[-1, , drop = FALSE]
+rownames(or_table) <- c("GEP (per SD)", "TMB (per SD)")
+print(round(or_table, 2))
+print(round(summary(fit)$coefficients, 4))
+```
+
+## Interpretation
+
+All three biomarkers were higher in responders, with moderate and similar
+strength: PDCD1 AUC 0.72 (95% CI 0.62-0.82), GEP 0.74 (0.63-0.84) and
+TMB 0.79 (0.68-0.90). All remained significant after Holm correction.
+The confidence intervals overlap almost completely, so we cannot rank the
+biomarkers; TMB has the highest point estimate but not a demonstrably
+stronger association.
+
+PDCD1 and the GEP score were strongly correlated (Spearman 0.91). In bulk
+RNA-seq both mainly reflect how many activated T cells are in the sample,
+so the single gene carries nearly the same information as the 18-gene score.
+TMB was not correlated with the GEP score (Spearman 0.09). It is measured in
+DNA and reflects how many potential neoantigens the tumor carries.
+
+When GEP and TMB were modelled together, both stayed associated with
+response (odds ratio per SD 2.69, 95% CI 1.51-5.20 for GEP; 3.13,
+1.81-5.99 for TMB). The two axes therefore contribute independently: a tumor
+is more likely to respond when it is both antigenic and already infiltrated
+by T cells.
+
+Limitations. There are only 25 responders (21 with TMB), so estimates are
+imprecise and the two-variable model is at the limit of what the data
+support. TMB is missing for 42 patients and we do not know whether it is
+missing at random. The cohort contains only complete responders and
+progressive disease, so the separation is likely larger than in unselected
+patients. These are associations within one cohort, not validated
+predictions for individual patients.
