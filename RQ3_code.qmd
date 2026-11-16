@@ -1,9 +1,10 @@
 ---
 title: "RQ3_script"
-format: html
+format:
+  html:
+    embed-resources: true
 editor: visual
 ---
-
 ## Research Question
 
 How do PD-1 (PDCD1) expression, the T-cell-inflamed GEP score and tumor mutational burden (TMB) compare in their association with response to anti-PD-L1 treatment?
