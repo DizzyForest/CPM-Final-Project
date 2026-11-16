@@ -186,7 +186,22 @@ rownames(or_table) <- c("GEP (per SD)", "TMB (per SD)")
 print(round(or_table, 2))
 print(round(summary(fit)$coefficients, 4))
 ```
+## Step 6: Are patients without TMB different?
 
+TMB is missing for 42 patients. If these patients differed from the rest in response or in immune infiltration, the TMB results could be biased. We compare patients with and without a TMB value.
+
+```{r}
+d$TMB_available <- !is.na(d$TMB)
+
+tab <- table(TMB_available = d$TMB_available, Response = d$Response)
+print(tab)
+print(round(100 * prop.table(tab, 1), 1))
+print(fisher.test(tab))
+
+print(aggregate(cbind(GEP, PDCD1) ~ TMB_available, data = d, FUN = median))
+print(wilcox.test(GEP ~ TMB_available, data = d, exact = FALSE))
+print(wilcox.test(PDCD1 ~ TMB_available, data = d, exact = FALSE))
+```
 ## Interpretation
 
 All three biomarkers were higher in responders, with moderate and similar
@@ -210,8 +225,8 @@ by T cells.
 
 Limitations. There are only 25 responders (21 with TMB), so estimates are
 imprecise and the two-variable model is at the limit of what the data
-support. TMB is missing for 42 patients and we do not know whether it is
-missing at random. The cohort contains only complete responders and
+support. 
+TMB is missing for 42 patients. These patients did not differ clearly from the rest in response rate (9.5% vs 14.0%, Fisher p = 0.61), GEP score or PDCD1 expression (Step 6), so we found no sign that the missing values bias the TMB results, although with 42 patients this check cannot exclude it. The cohort contains only complete responders and
 progressive disease, so the separation is likely larger than in unselected
 patients. These are associations within one cohort, not validated
 predictions for individual patients.
