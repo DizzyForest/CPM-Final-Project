@@ -1,11 +1,19 @@
 ---
 title: "RQ1_Kostas"
 format: html
+echo: false
 ---
 
-## Preparation and exploration of data
+Load libray
 
-load data
+```{r}
+library(tidyverse)
+library(gridExtra)
+```
+
+# Preparation and exploration of data
+
+## load data
 
 ```{r}
 counts_df <- readRDS("../data/counts_df.rds")
@@ -13,7 +21,7 @@ tpm_df <- readRDS("../data/tpm_df.rds")
 clinical_df <- readRDS("../data/clinical_df.rds")
 ```
 
-explore the data
+## explore the data
 
 ```{r}
 sum(is.na(counts_df))
@@ -23,8 +31,495 @@ table(clinical_df$BOR)
 summary(as.numeric(as.matrix(counts_df)))
 ```
 
-make a histogram with raw data
+## explore raw count distribution
 
 ```{r}
+sample_id <- colnames(counts_df)[10]
 
+## Check that this sample is also present in the TPM data
+sample_id %in% colnames(tpm_df)
+
+df_counts <- data.frame(
+  expression = counts_df[, sample_id]
+)
+```
+
+### make a histogram with raw data
+
+```{r}
+p1 <- ggplot(df_counts, aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Raw counts",
+    subtitle = sample_id,
+    x = "Raw count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p1
+```
+
+### Log2-transformed raw counts
+
+```{r}
+p2<-df_counts |> 
+  ggplot(aes(x=log2(expression+1)))+
+  geom_histogram(
+    bins=50,
+    fill='cyan',
+    color='black',
+    linewidth = 0.3
+  )+
+  labs(title='Log2-transformed raw counts',
+       subtitle = sample_id,
+       x="log2(raw count + 1)",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+
+p2
+```
+
+```{r}
+com_plot1<-grid.arrange(p1,p2,ncol=2)
+```
+
+## Explore normalized expression
+
+```{r}
+df_tpm<-data.frame(
+  expression =tpm_df[,sample_id]
+)
+```
+
+### Repeat the 2 plots for TPM
+
+```{r}
+p3 <- ggplot(df_tpm, aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "TPM counts",
+    subtitle = sample_id,
+    x = "TPM count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p3
+```
+
+```{r}
+p4<-df_tpm|>
+  ggplot(aes(x=log2(expression+1)))+
+  geom_histogram(
+    bins=50,
+    fill = 'cyan',
+    color = 'black',
+    linewidth = 0.3
+  ) +
+  labs(
+    title = 'Log-2 transformed TPM counts',
+    subtitle = sample_id,
+    x='log2 (TPM counts + 1)',
+    y='Number of genes'
+  )+
+  theme_minimal()
+p4
+```
+
+### Compare all four distributions
+
+```{r}
+com_plot2<-grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
+
+## Principal component analysis (PCA)
+
+### log2 transform
+
+```{r}
+## We center the log2-transformed FPKM data but do not scale genes to 
+## unit variance. Log2 transformation already reduces large expression 
+## differences, and scaling it again, would give all the genes 
+## equal variance, giving low-variance or noisy genes too much influence on PCA.
+
+tpm_df_logt<-log2(tpm_df+1)
+```
+
+### Remove genes with zero variance
+
+```{r}
+keep_count <- apply(tpm_df_logt, 1, sd)>1
+tpm_counts_pca<-tpm_df_logt[keep_count,]
+```
+
+```{r}
+pca_count<-prcomp(
+  t(tpm_counts_pca),
+  center =TRUE,
+  scale. = FALSE
+)
+```
+
+### Check how much variance is explained
+
+```{r}
+summary(pca_count)$importance[,1:7]
+```
+
+```{r}
+var_TPM <- 100 * pca_count$sdev^2 / sum(pca_count$sdev^2)
+```
+
+### Plot PC1 and PC2 with metadata
+
+```{r}
+df_pca_tpm <- data.frame(
+  sample_id = row.names(pca_count$x),
+  PC1 = pca_count$x[,1],
+  PC2 = pca_count$x[,2]
+)
+```
+
+#### match smaple id
+
+```{r}
+sample_match<-match(
+  df_pca_tpm$sample_id,
+  clinical_df$sample_id
+)
+sum(is.na(sample_match))
+```
+
+#### add label for responding
+
+```{r}
+df_pca_tpm$BOR<-factor(clinical_df$BOR[sample_match])
+```
+
+```{r}
+pca_plot1<-ggplot(df_pca_tpm, aes(x = PC1, y = PC2,color=BOR)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey60") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey60") +
+  geom_point(size = 2) +
+  theme_classic(base_size = 13) +
+  labs(
+    title = "PCA based on log2(TPM + 1)",
+    x = paste0("PC1 (", round(var_TPM[1], 1), "%)"),
+    y = paste0("PC2 (", round(var_TPM[2], 1), "%)")
+  )
+pca_plot1
+```
+
+# DESeq2
+
+### Prepare sample metadata
+
+```{r}
+library(DESeq2)
+```
+
+```{r}
+clinical_df$BOR <- factor(
+  clinical_df$BOR,
+  levels = c("NR", "R")
+)
+```
+
+```{r}
+rownames(clinical_df) <- clinical_df$sample_id
+
+identical(
+  colnames(counts_df),
+  rownames(clinical_df)
+)
+```
+
+### Create DESeq2
+
+```{r}
+dds<-DESeqDataSetFromMatrix(
+  countData = as.matrix(counts_df),
+  colData = clinical_df,
+  design = ~BOR
+  )
+```
+
+```{r}
+keep_dds<-rowSums(counts(dds))>=10
+dds_deseq_r<-dds[keep_dds,]
+```
+
+### Run DESeq2
+
+```{r}
+dds_after_deseq<-DESeq(dds_deseq_r)
+```
+
+### Results DESeq
+
+```{r}
+res<-results(dds_after_deseq)
+```
+
+```{r}
+resultsNames(dds_after_deseq)
+```
+
+### Interpret results
+
+```{r}
+summary(res)
+res_sig<-results(dds_after_deseq,alpha = 0.05)
+summary(res_sig)
+
+```
+
+## Visualization
+
+```{r}
+res_df<-as.data.frame(res)|>
+  mutate(significant=padj<0.05)
+  
+```
+
+### Volcano Plot
+
+```{r}
+volcano<-res_df|>
+  ggplot(aes(x=log2FoldChange,
+             y=-log10(padj),
+             color=significant))+
+  geom_point()+
+  scale_color_manual(values = c('red','green'))+
+  labs(x = "Log2 Fold Change",
+       y = "-Log10 Adjusted P-value",
+       title = "Volcano Plot") +
+  theme_minimal()
+volcano
+```
+
+```{r}
+res_df_2 <- as_tibble(res, rownames = "gene") |>
+  drop_na(padj, log2FoldChange) |>
+  mutate(
+    group = case_when(
+      padj < 0.05 & log2FoldChange > 0 ~ "Up in Responders(R)",
+      padj < 0.05 & log2FoldChange < 0 ~ "Up in Non-responders (NR)",
+      TRUE ~ "Not significant"
+    )
+  )
+
+top_labels <- res_df_2 |>
+  filter(group != "Not significant") |>
+  slice_min(padj, n = 10)
+
+volcano_spec<-ggplot(res_df_2, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(aes(color = group)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "grey40") +
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Up in Responders(R)" = "firebrick",
+      "Up in Non-responders (NR)" = "steelblue",
+      "Not significant" = "grey80"
+    )
+  ) +
+  geom_text(
+    data = top_labels,
+    aes(label = gene),
+    size = 3,
+    vjust = -0.6,
+    check_overlap = TRUE
+  ) +
+  annotate("text", x = max(res_df_2$log2FoldChange), y = 0.3,
+           label = "Higher in Responders(R) \u2192", hjust = 1, size = 3,
+           fontface = "italic", color = "firebrick") +
+  annotate("text", x = min(res_df_2$log2FoldChange), y = 0.3,
+           label = "\u2190 Higher in Non-responders (NR)", hjust = 0, size = 3,
+           fontface = "italic", color = "steelblue") +
+  labs(x = "Log2 Fold Change",
+       y = "-Log10 Adjusted P-value",
+       title = "Volcano Plot") +
+  theme_minimal()
+volcano_spec
+```
+
+### Heatmap
+
+```{r}
+library(pheatmap)
+```
+
+```{r}
+top20<-res_df %>% 
+ tibble::rownames_to_column("gene") %>% 
+  arrange(padj) %>% 
+  slice_head(n=20)
+top20
+```
+
+```{r}
+top20[, c("gene", "log2FoldChange", "padj")]
+```
+
+```{r}
+vsd <- vst(dds_after_deseq, blind = FALSE)
+
+vst_matrix <- assay(vsd)
+
+heatmap_matrix <- vst_matrix[top20$gene, ]
+dim(heatmap_matrix)
+```
+
+```{r}
+annotation_col <- data.frame(
+  BOR = dds_after_deseq$BOR,
+  row.names = colnames(heatmap_matrix)
+)
+sample_order <- order(annotation_col$BOR)
+
+heatmap_matrix <- heatmap_matrix[, sample_order]
+annotation_col <- annotation_col[sample_order, , drop = FALSE]
+
+
+```
+
+```{r}
+pheat<-pheatmap(
+  heatmap_matrix,
+  scale = "row",
+  annotation_col = annotation_col,
+  show_colnames = FALSE,
+  
+  breaks = seq(-2.5, 2.5, length.out = 101),
+  cluster_cols = FALSE,
+  gaps_col = sum(annotation_col$BOR == "NR"),
+  main = "Heatmap of Top 20 Differentially Expressed Genes"
+)
+pheat
+```
+
+## Biological processes - GSEA
+
+### Load libraries
+
+```{r}
+library(msigdbr)
+library(fgsea)
+```
+
+### Rank genes
+
+```{r}
+ranked_genes <- res$stat
+names(ranked_genes) <- rownames(res)
+
+ranked_genes <- ranked_genes[!is.na(ranked_genes)]
+ranked_genes <- ranked_genes[names(ranked_genes) != ""]
+```
+
+### Run fgsea against MSigDB gene sets
+
+```{r}
+gene_sets <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "BP") 
+gene_sets <- split(x = gene_sets$gene_symbol, f = gene_sets$gs_name) # converts to a format needed by fgsea
+
+set.seed(42) # reproducible permutations
+fgsea_res <- fgsea(pathways = gene_sets,
+                   stats = ranked_genes, # stats: gene names for GSEA
+                   nPermSimple = 10000) # raise from the default 1000 to resolve more pathway p-values
+```
+
+### **Visualize the enriched pathways**
+
+```{r}
+topPathways <- fgsea_res  |>
+  dplyr::arrange(padj) |>
+  dplyr::slice(1:5)
+
+pathways<-ggplot(topPathways,
+       mapping = aes(x = reorder(pathway, NES),
+                     y = NES)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = "Pathway",
+       y = "Normalized Enrichment Score (NES)",
+       title = "Top 5 Enriched Pathways") +
+  theme_minimal()
+pathways
+```
+
+### **GSEA table**
+
+```{r}
+number_of_top_pathways_up <- 10
+number_of_top_pathways_down <- 10
+
+topPathwaysUp <- fgsea_res[ES > 0][head(order(pval), n = number_of_top_pathways_up), pathway]
+topPathwaysDown <- fgsea_res[ES < 0][head(order(pval), n = number_of_top_pathways_down), pathway]
+topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
+```
+
+```{r}
+gsea_table<-plotGseaTable(
+  gene_sets[topPathways],
+  stats = ranked_genes,
+  fgseaRes = fgsea_res,
+  gseaParam = 0.5
+)
+gsea_table
+```
+
+```{r}
+enr1<-plotEnrichment(gene_sets[[head(fgsea_res[order(padj), ], 1)$pathway]],
+
+               ranked_genes) +
+
+  labs(title = head(fgsea_res[order(padj), ], 1)$pathway) +
+  coord_cartesian(ylim = c(-0.6, 0.4))
+enr1
+```
+
+```{r}
+enr2<-plotEnrichment(gene_sets[[head(fgsea_res[order(abs(NES)), ], 1)$pathway]],
+               ranked_genes) +
+  labs(title = head(fgsea_res[order(abs(NES)), ], 1)$pathway) +
+  coord_cartesian(ylim = c(-0.6, 0.4)) # to keep it in the same axis as the most enriched for comparison
+enr2
+```
+
+```{r}
+enr3<-plotEnrichment(gene_sets[[head(fgsea_res[size >= 50][order(abs(NES)), ], 1)$pathway]],
+               ranked_genes) +
+  labs(title = head(fgsea_res[size >= 50][order(abs(NES)), ], 1)$pathway) +
+  coord_cartesian(ylim = c(-0.6, 0.4)) # to keep it in the same axis as the most enriched for comparison
+enr3
+```
+
+```{r}
+enr4<-plotEnrichment(gene_sets[[head(fgsea_res[ES < 0][order(padj), ], 1)$pathway]],
+               ranked_genes) +
+  labs(title = head(fgsea_res[ES < 0][order(padj), ], 1)$pathway)
+enr4
+```
+
+```{r}
+reactome_sets <- msigdbr(species = "Homo sapiens", category  = "C2", subcategory = "CP:REACTOME")
+reactome_sets <- split(x = reactome_sets$gene_symbol, f = reactome_sets$gs_name)
+
+enr5<-plotEnrichment(reactome_sets[["REACTOME_FORMATION_OF_FIBRIN_CLOT_CLOTTING_CASCADE"]],
+               ranked_genes) +
+  labs(title = "Reactome pathway: Formation of fibrin clot / clotting cascade")
+enr5
 ```
