@@ -1,0 +1,322 @@
+---
+title: "RQ2_script"
+format: html
+editor: visual
+---
+
+## Research Question
+
+For RQ2, we wanted to see whether patients who responded to anti-PD-L1 treatment had higher expression of the T-cell-inflamed gene signature than patients who did not respond. We used the 18-gene signature described by Ayers et al. (2017) and the IMvigor210 dataset. We first calculated a GEP score for each sample using standardized gene expression. Then we compared the scores between responders (R) and non-responders (NR). We also used ssGSEA as a second way of scoring the same gene set.
+
+## Step 1: Load and prepare the data
+
+We used TPM values because we are comparing gene expression between samples. We also need the clinical table to identify responders and non-responders.
+
+```{r}
+# Load required packages for the analysis.
+library(ggplot2)
+library(GSVA)
+
+# load data
+input_file <- "IMvigor210_plain.rds"
+imvigor <- readRDS(input_file)
+tpm <- as.matrix(imvigor$tpm)
+clinical <- as.data.frame(imvigor$clinical)
+
+# Check if the TPM matrix and clinical data are valid before calculating GEP scores.
+stopifnot(
+  !is.null(rownames(tpm)),              # gene names exist
+  !is.null(colnames(tpm)),              # sample IDs exist
+  all(c("sample_id", "BOR") %in% names(clinical)), # Check required clinical columns
+  !anyDuplicated(rownames(tpm)),        # gene names are unique
+  !anyDuplicated(colnames(tpm)),        # TPM sample IDs are unique
+  !anyDuplicated(clinical$sample_id),   # clinical sample IDs are unique
+  !anyNA(tpm),                          # Check that there are no missing expression values
+  all(is.finite(tpm)),                  # all expression values are finite
+  all(tpm >= 0)                         # Check that TPM values are non-negative
+)
+
+# Check that all clinical samples are present in the TPM matrix.
+stopifnot(
+  all(clinical$sample_id %in% colnames(tpm))
+)
+
+# Reorder TPM columns to match the sample order in the clinical data.
+tpm <- tpm[, clinical$sample_id, drop = FALSE]
+
+
+
+# Make sure the expression and clinical data have the same sample order.
+common_samples <- intersect(clinical$sample_id, colnames(tpm))
+clinical <- clinical[match(common_samples, clinical$sample_id), , drop = FALSE]
+tpm <- tpm[, common_samples, drop = FALSE]
+
+# Keep only samples labelled R or NR.
+keep <- !is.na(clinical$BOR) & clinical$BOR %in% c("NR", "R")
+clinical <- clinical[keep, , drop = FALSE]
+tpm <- tpm[, keep, drop = FALSE]
+clinical$Response <- factor(clinical$BOR, levels = c("NR", "R"))
+stopifnot(identical(colnames(tpm), clinical$sample_id))
+
+# Folder for figures and output files.
+output_dir <- "RQ2_results"
+dir.create(output_dir, showWarnings = FALSE)
+
+# Count the number of samples in each treatment response group.
+sample_counts <- as.data.frame(table(clinical$Response))
+
+# Rename the columns to "Response" and "Samples".
+names(sample_counts) <- c("Response", "Samples")
+
+# Display the counts 
+print("Number of samples by treatment response.")
+print(sample_counts)
+
+```
+
+## Step 2: Calculate the GEP score
+
+First, we applied `log2(TPM + 1)` to reduce the influence of very large expression values. Next, we converted the expression values of each gene into z-scores across all samples. This standardized the expression values so that genes with naturally higher expression levels would not disproportionately influence the overall GEP score.
+
+Finally, we took the average of the 18 z-scores for each sample. A higher score means that these genes tend to be expressed above their average level in our dataset.
+
+```{r}
+
+#18 genes included in the GEP signature.
+GEP_genes <- c(
+  "CCL5", "CD27", "CD274", "CD276", "CD8A", "CMKLR1",
+  "CXCL9", "CXCR6", "HLA-DQA1", "HLA-DRB1", "HLA-E",
+  "IDO1", "LAG3", "NKG7", "PDCD1LG2", "PSMB10",
+  "STAT1", "TIGIT"
+)
+
+# all 18 GEP genes are present in the TPM matrix?
+missing_genes <- setdiff(GEP_genes, rownames(tpm))
+# Stop the analysis if any of the genes are missing.
+if (length(missing_genes) > 0) {
+  stop("Missing signature genes: ", paste(missing_genes, collapse = ", "))
+}
+
+# Extract the TPM expression values for the 18 GEP genes.
+GEP_tpm <- tpm[GEP_genes, , drop = FALSE]
+
+# Apply log2(TPM + 1) 
+GEP_log2 <- log2(GEP_tpm + 1)
+
+# Calculate the standard deviation of each gene across all samples.
+gene_sd <- apply(GEP_log2, 1, sd)
+# Stop if any gene has zero or undefined variation across samples.
+if (any(!is.finite(gene_sd) | gene_sd == 0)) {
+  stop("A signature gene has zero or undefined variation.")
+}
+
+# Convert each gene's expression values into z-scores across all samples.
+# This puts genes on a comparable scale (mean = 0, SD = 1).
+GEP_scaled <- t(scale(t(GEP_log2)))
+
+# Calculate one GEP score per sample by averaging the 18 gene z-scores.
+GEP_scores <- colMeans(GEP_scaled)
+
+# Create a dataframe combining clinical information and GEP scores.
+# Match scores by sample ID to ensure they are assigned to the correct samples.
+RQ2_results <- data.frame(
+  sample_id = clinical$sample_id,
+  BOR = clinical$BOR,
+  Response = clinical$Response,
+  GEP_score = unname(GEP_scores[clinical$sample_id])
+)
+```
+
+## Step 3: Compare GEP scores between responders and non-responders
+
+We used a Wilcoxon rank-sum test to compare the two groups. We also plotted the scores to see how much the groups overlap.
+
+```{r}
+# GEP scores between responders and non-responders.
+GEP_test <- wilcox.test(
+  GEP_score ~ Response,       # Compare GEP scores between response groups
+  data = RQ2_results)        
+
+# Calculate the median GEP score for each response group.
+GEP_medians <- aggregate(GEP_score ~ Response, RQ2_results, median)
+
+# Display the median GEP scores
+print("Median standardized GEP score by response group.")
+print(GEP_medians)
+
+# Print the p-value from the Wilcoxon test
+cat("Wilcoxon p-value:", signif(GEP_test$p.value, 4), "\n")
+```
+
+```{r}
+#| fig-width: 7.5
+#| fig-height: 4.8
+#| fig-cap: "GEP scores by best overall response. Each point represents one sample; boxes show the median and interquartile range."
+
+p_gep <- ggplot(RQ2_results,
+                aes(x = Response, y = GEP_score, fill = Response)) +
+  geom_boxplot(width = 0.55, alpha = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.13, alpha = 0.55, size = 1.6) +
+  scale_fill_manual(values = c(NR = "#F4A09C", R = "#58C8CD")) +
+  labs(title = "T-cell-inflamed GEP and treatment response",
+       subtitle = paste0("Wilcoxon p = ", signif(GEP_test$p.value, 3)),
+       x = "Best overall response",
+       y = "Mean gene-wise z-score of log2(TPM + 1)") +
+  theme_classic(base_size = 12) +
+  guides(fill = "none")
+print(p_gep)
+
+ggsave(file.path(output_dir, "GEP_by_response.png"), p_gep,
+       width = 7.5, height = 4.8, dpi = 300)
+```
+
+Responders had a higher median GEP score than non-responders (0.671 compared with -0.083). The difference was statistically significant (Wilcoxon test, *p* = 0.000137). However, there is still overlap between the groups. Some non-responders have high scores, so GEP alone cannot tell us for certain whether an individual patient will respond.
+
+Our results are be consistent with Ayers et al. (2017), who found that this signature was associated with response to pembrolizumab. It also supports Mariathasan et al.'s broader finding that T-cell-related gene expression is associated with response to atezolizumab.
+
+## Step 4: Look at the expression of the individual genes
+
+We made a heatmap to see how the 18 genes contribute to the overall GEP pattern. Red indicates expression above the gene's average in this dataset, while blue indicates expression below the average. We grouped the samples by response and sorted them by GEP score within each group. Because we sorted by score, the colour gradient is partly expected and should not be treated as a separate statistical result.
+
+```{r}
+#| fig-width: 11
+#| fig-height: 5.5
+#| fig-cap: "Gene-wise standardized expression of the 18-gene signature. Samples are ordered by GEP score within response groups."
+
+sample_order <- order(RQ2_results$Response, RQ2_results$GEP_score)
+ordered_samples <- colnames(GEP_scaled)[sample_order]
+
+heatmap_data <- data.frame(
+  sample_id = rep(ordered_samples, each = length(GEP_genes)),
+  gene = rep(GEP_genes, times = length(ordered_samples)),
+  z_score = as.vector(GEP_scaled[, sample_order, drop = FALSE]),
+  Response = rep(as.character(RQ2_results$Response[sample_order]),
+                 each = length(GEP_genes))
+)
+heatmap_data$sample_id <- factor(heatmap_data$sample_id,
+                                 levels = ordered_samples)
+heatmap_data$gene <- factor(heatmap_data$gene,
+                            levels = rev(GEP_genes))
+
+p_heatmap <- ggplot(heatmap_data,
+                    aes(x = sample_id, y = gene, fill = z_score)) +
+  geom_tile() +
+  facet_grid(. ~ Response, scales = "free_x", space = "free_x") +
+  scale_fill_gradient2(low = "navy", mid = "white", high = "firebrick",
+                       midpoint = 0, name = "Gene z-score") +
+  labs(title = "T-cell-inflamed GEP expression heatmap",
+       x = "Samples ordered by GEP score", y = "Gene") +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+        panel.grid = element_blank())
+print(p_heatmap)
+
+ggsave(file.path(output_dir, "GEP_heatmap.png"), p_heatmap,
+       width = 11, height = 5.5, dpi = 300)
+```
+
+## Step 5: Calculate ssGSEA scores
+
+We also tried ssGSEA. Instead of averaging standardized expression values, ssGSEA ranks genes within each sample and measures how strongly the 18 signature genes are represented among the more highly expressed genes. For this step we used the full TPM matrix, not only the 18 genes, because ssGSEA needs the other genes for ranking.
+
+After calculating one ssGSEA score per sample, we again compared responders and non-responders with a Wilcoxon test. The ssGSEA scores are on a different scale from our mean z-score GEP, so their numerical values should not be compared directly.
+
+```{r}
+
+ssgsea_parameters <- ssgseaParam(
+  exprData = tpm,                              # Full TPM expression matrix
+  geneSets = list(Tcell_inflamed = GEP_genes)  # The 18 genes of interest
+)
+
+# Run ssGSEA to calculate an enrichment score for each sample.
+ssgsea_matrix <- gsva(ssgsea_parameters, verbose = FALSE)
+
+# Extract the ssGSEA scores
+ssgsea_scores <- as.numeric(ssgsea_matrix["Tcell_inflamed", ])
+
+# Assign sample IDs to the ssGSEA scores.
+names(ssgsea_scores) <- colnames(ssgsea_matrix)
+
+# Add ssGSEA scores to the results dataframe, match scores by sample ID
+RQ2_results$ssGSEA_score <- unname(ssgsea_scores[RQ2_results$sample_id])
+
+# Perform Wilcoxon rank-sum test
+ssGSEA_test <- wilcox.test(
+  ssGSEA_score ~ Response,       # Compare ssGSEA scores between response groups
+  data = RQ2_results)
+
+# Calculate the median ssGSEA score for each response group.
+ssGSEA_medians <- aggregate(ssGSEA_score ~ Response, RQ2_results, median)
+
+# Display the median ssGSEA scores
+print("Median ssGSEA score by response group.")
+print(ssGSEA_medians)
+
+# Print the p-value from the Wilcoxon test
+cat("Wilcoxon p-value:", signif(ssGSEA_test$p.value, 4), "\n")
+```
+
+```{r}
+#| fig-width: 7.5
+#| fig-height: 4.8
+#| fig-cap: "T-cell-inflamed ssGSEA scores by best overall response. Each point represents one sample."
+
+p_ssgsea <- ggplot(RQ2_results,
+                   aes(x = Response, y = ssGSEA_score, fill = Response)) +
+  geom_boxplot(width = 0.55, alpha = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.13, alpha = 0.55, size = 1.6) +
+  scale_fill_manual(values = c(NR = "#F4A09C", R = "#58C8CD")) +
+  labs(title = "T-cell-inflamed ssGSEA and treatment response",
+       subtitle = paste0("Wilcoxon p = ", signif(ssGSEA_test$p.value, 3)),
+       x = "Best overall response", y = "ssGSEA score") +
+  theme_classic(base_size = 12) +
+  guides(fill = "none")
+print(p_ssgsea)
+
+ggsave(file.path(output_dir, "ssGSEA_by_response.png"), p_ssgsea,
+       width = 7.5, height = 4.8, dpi = 300)
+```
+
+The ssGSEA scores were also higher in responders (median 0.930) than in non-responders (median 0.738), with *p* = 0.000163. This agrees with the result from our mean z-score method. However, both analyses use the same samples and genes, so ssGSEA is a useful comparison of methods rather than an independent validation.
+
+## Step 6: Interpret the results
+
+| Scoring method        | NR median | R median | Wilcoxon p-value |
+|-----------------------|----------:|---------:|-----------------:|
+| Mean standardized GEP |    −0.083 |    0.671 |         0.000137 |
+| ssGSEA                |     0.738 |    0.930 |         0.000163 |
+
+Both methods gave the same overall result: responders tended to have higher T-cell-inflamed signature scores. One possible explanation is that tumors with more existing immune activity are more likely to respond to PD-L1 blockade.
+
+However, the groups are not completely separated. A high score does not guarantee response, because other factors can affect whether immune cells can attack the tumor. For example, T-cell exclusion and stromal signalling may limit treatment response (Mariathasan et al., 2018). Another limitation is that bulk RNA-seq includes expression from tumor cells as well as immune and stromal cells. Therefore, a high immune signature score may partly reflect the number of immune cells in the sample.
+
+Overall, we found an association between the signature and treatment response in this cohort. We cannot conclude from this analysis alone that the signature causes response or can accurately predict response for individual patients.
+
+**Question: Why a high T- cell–inflamed GEP score does not necessarily guarantee treatment response?**
+
+A high T cell–inflamed GEP score does not guarantee treatment response because the score measures immune activity in the tumour, but it does not tell us whether the immune system can successfully kill the cancer cells.
+
+## Scores for RQ3
+
+The GEP score can then be used in RQ3 when comparing GEP with PDCD1 expression and TMB.
+
+```{r}
+# Save sample-level scores and a summary of the tests.
+write.csv(RQ2_results,
+          file.path(output_dir, "RQ2_GEP_and_ssGSEA_scores_for_RQ3.csv"),
+          row.names = FALSE)
+saveRDS(RQ2_results,
+        file.path(output_dir, "RQ2_GEP_and_ssGSEA_scores_for_RQ3.rds"))
+
+summary_table <- data.frame(
+  method = c("Mean standardized GEP", "ssGSEA"),
+  median_NR = c(GEP_medians$GEP_score[GEP_medians$Response == "NR"],
+                ssGSEA_medians$ssGSEA_score[ssGSEA_medians$Response == "NR"]),
+  median_R = c(GEP_medians$GEP_score[GEP_medians$Response == "R"],
+               ssGSEA_medians$ssGSEA_score[ssGSEA_medians$Response == "R"]),
+  wilcoxon_p_value = c(GEP_test$p.value, ssGSEA_test$p.value)
+)
+write.csv(summary_table,
+          file.path(output_dir, "RQ2_statistical_summary.csv"),
+          row.names = FALSE)
+```
