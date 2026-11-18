@@ -424,7 +424,7 @@ This suggests that treatment response is not the dominant source of variation ca
 However, the absence of clear clustering does not exclude differential expression between the two groups, which we subsequently investigated using DESeq2.
 
 | Ερώτηση | Τι απαντάμε |
-|----|----|
+|------------------------------------|------------------------------------|
 | Why did you perform PCA? | To explore global expression variability, potential outliers and clustering by treatment response. |
 | Why use log2 TPM? | To use normalized expression values and reduce the influence of extremely high expression levels. |
 | Why transpose the matrix? | Because PCA requires samples as observations (rows) and genes as variables (columns). |
@@ -841,6 +841,18 @@ pathways<-ggplot(topPathways,
 pathways
 ```
 
+To investigate the biological functions associated with treatment response, we performed Gene Set Enrichment Analysis using Gene Ontology Biological Process gene sets.
+
+We ranked genes using the DESeq2 test statistic and identified biological processes enriched in Responders and Non-responders.
+
+This plot shows five enriched processes with positive normalized enrichment scores, indicating enrichment towards the Responder group.
+
+The strongest enrichment was observed for DNA repair, followed by DNA metabolic processes, chromosome organization, and cell cycle-related processes.
+
+Interestingly, these processes are biologically related, suggesting a common pattern involving DNA maintenance and cell cycle regulation.
+
+These findings suggest an association between treatment response and these biological functions, but they do not establish a causal relationship with immunotherapy efficacy.
+
 ### **GSEA table**
 
 ```{r}
@@ -862,9 +874,9 @@ gsea_table<-plotGseaTable(
 gsea_table
 ```
 
-οι Responders εμφανίζουν enrichment διεργασιών που σχετίζονται με τον κυτταρικό κύκλο και τον μεταβολισμό του DNA. Οι Non-responders εμφανίζουν enrichment διεργασιών που σχετίζονται με κυτταρική προσκόλληση, μετακίνηση και αναδιαμόρφωση ιστών.
+Responders showed enrichment of biological processes related to the cell cycle and DNA metabolism, while Non-responders showed enrichment of processes related to cell adhesion, migration, and tissue remodeling.
 
-Αυτό δημιουργεί ενδιαφέρουσες υποθέσεις για διαφορές στο tumor microenvironment, αλλά δεν αποδεικνύει ότι αυτές οι διεργασίες προκαλούν ανταπόκριση ή αντίσταση στην ανοσοθεραπεία.
+These findings suggest potential differences in the tumor microenvironment between the two groups. However, they do not establish that these processes directly cause response or resistance to anti-PD-L1 immunotherapy.
 
 ```{r}
 enr1<-plotEnrichment(gene_sets[[head(fgsea_res[order(padj), ], 1)$pathway]],
@@ -876,7 +888,7 @@ enr1<-plotEnrichment(gene_sets[[head(fgsea_res[order(padj), ], 1)$pathway]],
 enr1
 ```
 
-**συλλογική τάση υψηλότερης έκφρασης cell-cycle-related genes στους R**.
+The enrichment plot shows a coordinated tendency for cell-cycle-related genes to have higher expression in Responders compared to Non-responders.
 
 ```{r}
 enr2<-plotEnrichment(gene_sets[[head(fgsea_res[order(abs(NES)), ], 1)$pathway]],
@@ -886,7 +898,7 @@ enr2<-plotEnrichment(gene_sets[[head(fgsea_res[order(abs(NES)), ], 1)$pathway]],
 enr2
 ```
 
-**τα γονίδια του pathway δεν παρουσιάζουν κάποιο ιδιαίτερα καθαρό μοτίβο συγκέντρωσης**
+The genes in this pathway do not show a clear enrichment pattern, as they are not strongly concentrated towards either end of the ranked gene list.
 
 ```{r}
 enr3<-plotEnrichment(gene_sets[[head(fgsea_res[size >= 50][order(abs(NES)), ], 1)$pathway]],
@@ -896,7 +908,7 @@ enr3<-plotEnrichment(gene_sets[[head(fgsea_res[size >= 50][order(abs(NES)), ], 1
 enr3
 ```
 
-Αυτό σημαίνει ότι τα γονίδια του pathway κατανέμονται σε διαφορετικά σημεία της ranked list. Δεν υπάρχει τόσο έντονο και μονοκατευθυντικό σήμα όσο στο cell cycle.
+The pathway genes are distributed across different positions in the ranked gene list, showing a less pronounced and less directional enrichment pattern compared to the cell cycle pathway.
 
 ```{r}
 enr4<-plotEnrichment(gene_sets[[head(fgsea_res[ES < 0][order(padj), ], 1)$pathway]],
@@ -905,9 +917,9 @@ enr4<-plotEnrichment(gene_sets[[head(fgsea_res[ES < 0][order(padj), ], 1)$pathwa
 enr4
 ```
 
-Άρα βλέπουμε enrichment των genes που σχετίζονται με biological adhesion προς την πλευρά των **Non-responders**.
+We observe enrichment of biological adhesion-related genes towards the Non-responder group.
 
-Η biological adhesion περιλαμβάνει διεργασίες προσκόλλησης μεταξύ κυττάρων ή μεταξύ κυττάρων και του εξωκυττάριου περιβάλλοντος.
+Biological adhesion includes processes involved in cell-to-cell interactions and interactions between cells and the extracellular matrix.
 
 ```{r}
 reactome_sets <- msigdbr(species = "Homo sapiens", category  = "C2", subcategory = "CP:REACTOME")
@@ -919,13 +931,9 @@ enr5<-plotEnrichment(reactome_sets[["REACTOME_FORMATION_OF_FIBRIN_CLOT_CLOTTING_
 enr5
 ```
 
-Οι μαύρες κάθετες γραμμές συγκεντρώνονται περισσότερο προς το δεξί άκρο.
+The black vertical lines are concentrated towards the right side of the ranked gene list, resulting in a strong negative enrichment score. This indicates that genes involved in the fibrin clot formation and blood coagulation pathways are enriched in Non-responders.
 
-**Αυτό δείχνει ισχυρό αρνητικό enrichment score, δηλαδή συγκέντρωση των συγκεκριμένων pathway genes προς τους NR.**
-
-Το pathway σχετίζεται με τον μηχανισμό πήξης του αίματος και τον σχηματισμό θρόμβου ινικής.
-
-Μπορεί να έχει ενδιαφέρον για την ερμηνεία του tumor microenvironment, ιδιαίτερα επειδή στο volcano plot είδαμε γονίδια όπως το `FGB` με υψηλότερη έκφραση στους NR.
+This finding may be relevant to differences in the tumor microenvironment, especially since we also identified genes such as FGB with higher expression in Non-responders in our volcano plot.
 
 Collapsed
 
@@ -967,13 +975,13 @@ mainPathways |>
   head(20)
 ```
 
-Στις εικόνες σου βλέπουμε ότι τα σημαντικότερα main pathways εξακολουθούν να σχετίζονται κυρίως με:
+After collapsing overlapping pathways, the main biological patterns remained consistent with our initial GSEA results.
 
--   **Responders:** Cell cycle, DNA repair, chromosome segregation και DNA replication.
+Responders were mainly associated with cell cycle, DNA repair, chromosome segregation, and DNA replication, while Non-responders were associated with biological adhesion, tissue development, tube development, and circulatory system development.
 
--   **Non-responders:** Biological adhesion, tissue development, tube development και circulatory system development.
+Overall, this supports the biological patterns identified in our original GSEA analysis.
 
-Άρα διατηρείται η ίδια γενική βιολογική εικόνα που είδαμε στο αρχικό GSEA.
+We used collapsePathways to reduce redundancy between overlapping gene sets and identify the main enriched biological processes.
 
 ```{r}
 mainPathways |>
@@ -981,6 +989,7 @@ mainPathways |>
     R = sum(NES > 0),
     NR = sum(NES < 0)
   )
+
 ```
 
 ```{r}
@@ -996,11 +1005,9 @@ top_main <- bind_rows(top_R, top_NR)
 top_main
 ```
 
-**Στους Responders**, το enrichment σχετίζεται περισσότερο με κυτταρικό πολλαπλασιασμό και DNA-related processes.
+In Responders, enrichment was mainly associated with cell proliferation and DNA-related processes, while in Non-responders, it was associated with tissue organization, cell adhesion, and vascular development.
 
-**Στους Non-responders**, σχετίζεται περισσότερο με tissue organization, adhesion και vascular development.
-
-Αυτές οι διεργασίες θα μπορούσαν να σχετίζονται με διαφορές στο tumor microenvironment και την ανταπόκριση στην ανοσοθεραπεία, αλλά χρειαζόμαστε προσεκτική ερμηνεία.
+These findings may reflect differences in the tumor microenvironment that could be relevant to immunotherapy response. However, further investigation is needed to understand their biological significance.
 
 ```{r}
 top_main <- top_main |>
@@ -1029,4 +1036,53 @@ collapsed<-ggplot(top_main,
   ) +
   theme_minimal()
 collapsed
+```
+
+This plot summarizes the five representative biological processes enriched in each group, following pathway redundancy reduction.
+
+The positive NES values indicate enrichment towards Responders, mainly involving DNA repair and cell cycle-related processes, while the negative NES values indicate enrichment towards Non-responders, mainly involving tissue development, biological adhesion, and vascular development.
+
+This highlights two distinct biological expression patterns associated with treatment response.
+
+collapse for all the papthways
+
+```{r}
+sigPathwaysS <- fgsea_res[pval < 0.05][order(pval)]
+nrow(sigPathwaysS)
+set.seed(42)
+
+
+system.time({
+  collapsedPathwaysS <- suppressWarnings(
+    collapsePathways(
+      sigPathwaysS,
+      gene_sets,
+      ranked_genes,
+      nperm = 100
+    )
+  )
+})
+mainPathwaysS <- fgsea_res[
+  pathway %in% collapsedPathwaysS$mainPathways
+][order(-NES)]
+nrow(mainPathwaysS)
+
+#compare with the collapse for the 100 most significant pathways
+nrow(sigPathwaysS)
+nrow(mainPathwaysS)
+
+head(mainPathwaysS)
+
+# Top 5 Responders
+head(
+  mainPathwaysS[padj < 0.05 & NES > 0][order(padj)],
+  5
+)
+
+# Top 5 Non-responders
+head(
+  mainPathwaysS[padj < 0.05 & NES < 0][order(padj)],
+  5
+)
+#results are the same
 ```
