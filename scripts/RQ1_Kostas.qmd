@@ -40,14 +40,15 @@ sample_id <- colnames(counts_df)[10]
 sample_id %in% colnames(tpm_df)
 
 df_counts <- data.frame(
-  expression = counts_df[, sample_id]
+  expression = counts_df[,sample_id]
 )
 ```
 
 ### make a histogram with raw data
 
 ```{r}
-p1 <- ggplot(df_counts, aes(x = expression)) +
+p1 <- df_counts %>% 
+  ggplot(aes(x = expression)) +
   geom_histogram(
     bins = 50,
     fill = "lightgreen",
@@ -61,13 +62,14 @@ p1 <- ggplot(df_counts, aes(x = expression)) +
     y = "Number of genes"
   ) +
   theme_classic(base_size = 13)
+  
 p1
 ```
 
 ### Log2-transformed raw counts
 
 ```{r}
-p2<-df_counts |> 
+p2<-df_counts |>
   ggplot(aes(x=log2(expression+1)))+
   geom_histogram(
     bins=50,
@@ -77,7 +79,7 @@ p2<-df_counts |>
   )+
   labs(title='Log2-transformed raw counts',
        subtitle = sample_id,
-       x="log2(raw count + 1)",
+       x="log2(raw count)",
     y = "Number of genes"
   ) +
   theme_classic(base_size = 13)
@@ -100,7 +102,8 @@ df_tpm<-data.frame(
 ### Repeat the 2 plots for TPM
 
 ```{r}
-p3 <- ggplot(df_tpm, aes(x = expression)) +
+p3 <- df_tpm %>% 
+  ggplot(aes(x = expression)) +
   geom_histogram(
     bins = 50,
     fill = "lightgreen",
@@ -129,18 +132,204 @@ p4<-df_tpm|>
   labs(
     title = 'Log-2 transformed TPM counts',
     subtitle = sample_id,
-    x='log2 (TPM counts + 1)',
+    x='log2 (TPM counts)',
     y='Number of genes'
   )+
   theme_minimal()
 p4
 ```
 
+non zero
+
+```{r}
+p5 <- df_counts %>% 
+   dplyr::filter(expression > 0) %>%
+  ggplot(aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Non-zero raw counts",
+    subtitle = sample_id,
+    x = "Raw count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p5
+```
+
+```{r}
+p6<-df_counts |>
+   dplyr::filter(expression > 0) %>%
+  ggplot(aes(x=log2(expression)))+
+  geom_histogram(
+    bins=50,
+    fill='cyan',
+    color='black',
+    linewidth = 0.3
+  )+
+  labs(title='Log2-transformed non-zero raw counts',
+       subtitle = sample_id,
+       x="log2(raw count)",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+
+p6
+```
+
+```{r}
+p7 <- df_tpm %>% 
+   dplyr::filter(expression > 0) %>%
+  ggplot(aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "TPM non-zero counts",
+    subtitle = sample_id,
+    x = "TPM count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p7
+```
+
+```{r}
+p8<-df_tpm|>
+   dplyr::filter(expression > 0) %>%
+  ggplot(aes(x=log2(expression)))+
+  geom_histogram(
+    bins=50,
+    fill = 'cyan',
+    color = 'black',
+    linewidth = 0.3
+  ) +
+  labs(
+    title = 'Log-2 transformed TPM non-zero counts',
+    subtitle = sample_id,
+    x='log2 (TPM counts)',
+    y='Number of genes'
+  )+
+  theme_minimal()
+p8
+```
+
+### Compare all four non-zero distributions
+
+```{r}
+com_plot3<-grid.arrange(p5, p6, p7, p8, ncol = 2)
+```
+
+Negative log2 values correspond to genes with TPM values between zero and one. They do not indicate negative gene expression, but rather low positive expression levels.
+
+We also examined the non-zero expression distributions of the same sample to better understand the distribution of genes with detectable expression.
+
+In the original histograms, the large concentration of zero and low-expression values made it difficult to visualize the remaining distribution.
+
+By excluding zero values, we wanted to investigate whether the strong right-skewness was caused only by zeros or also by differences in expression levels.
+
+We observed that both raw counts and TPM remained highly right-skewed even after removing zeros, indicating that the skewness was not exclusively driven by zero expression values.
+
+Log2 transformation made the distributions easier to interpret, particularly for TPM, where small positive values became visible on the negative log2 scale.
+
+This filtering was performed only for exploratory visualization and was not used as the prefiltering strategy for DESeq2.
+
+After excluding zero raw counts and applying log2 transformation, we observed two distinct regions in the distribution.
+
+The first peak near zero corresponds mainly to genes with a single read, since log2(1) equals zero. The separate bars at low values reflect the discrete, integer nature of raw counts.
+
+A broader peak appears around log2 counts of 10, corresponding to approximately 1,000 reads per gene.
+
+This shows that genes have widely different expression levels, and that log transformation helps reveal the structure of the count distribution
+
+```{r}
+all_raw <- as.vector(as.matrix(counts_df))
+all_raw_plot_log<-ggplot(data.frame(expression = all_raw),
+       aes(x = log2(expression + 1))) +
+  geom_histogram(bins = 10, fill = "cyan", color = "black") +
+  labs(
+    title = "RAW distribution across all 192 samples",
+    x = "log2(RAW + 1)",
+    y = "Number of gene-sample observations"
+  ) +
+  theme_classic()
+all_raw_plot_log
+```
+
+```{r}
+all_tpm <- as.vector(as.matrix(tpm_df))
+all_tpm_plot_log<-ggplot(data.frame(expression = all_tpm),
+       aes(x = log2(expression + 1))) +
+  geom_histogram(bins = 10, fill = "cyan", color = "black") +
+  labs(
+    title = "TPM distribution across all 192 samples",
+    x = "log2(TPM + 1)",
+    y = "Number of gene-sample observations"
+  ) +
+  theme_classic()
+all_tpm_plot_log
+```
+
+```{r}
+com_plot_all<-grid.arrange(all_raw_plot_log,all_tpm_plot_log,ncol=2)
+```
+
+We also examined the log2-transformed expression distributions across all 192 samples.
+
+Both raw counts and TPM showed a prominent peak near zero, indicating a high frequency of zero and low-expression observations.
+
+The raw-count distribution showed a second peak around log2 expression values of 9–10, whereas TPM values were concentrated at lower transformed values due to differences in normalization and scale.
+
+These plots summarize the overall expression distributions across the cohort, but they do not reveal differences between individual patients or treatment-response groups.
+
 ### Compare all four distributions
 
 ```{r}
 com_plot2<-grid.arrange(p1, p2, p3, p4, ncol = 2)
 ```
+
+*RNA-seq expression data are highly skewed, and log transformation improves visualization without removing zero values or necessarily making the distribution normal.*
+
+We first explored the gene expression distributions of one representative sample using raw counts and TPM values.
+
+Both raw counts and TPM showed highly right-skewed distributions, with most genes concentrated at low expression values and a small number exhibiting very high expression.
+
+After applying log2 transformation, the large values were compressed, making the distributions easier to visualize.
+
+However, a prominent peak remained near zero because many genes had zero or very low expression.
+
+Overall, these plots illustrate the skewness of RNA-seq expression data and the usefulness of logarithmic transformation for exploratory visualization.
+
+Why is the distribution right-skewed?
+
+Most genes have low counts, while a few genes are highly expressed.
+
+Why log2 transformation?
+
+To compress large values and improve visualization.
+
+Why add 1?
+
+To avoid taking the logarithm of zero.
+
+Why does the zero peak remain?
+
+Because log2(0 + 1) = 0.
+
+Does log transformation normalize the data?
+
+No. Transformation and normalization are different processes.
+
+Did you use log2 TPM for DESeq2?
+
+No. DESeq2 uses raw counts and performs its own normalization.
 
 ## Principal component analysis (PCA)
 
@@ -220,6 +409,29 @@ pca_plot1<-ggplot(df_pca_tpm, aes(x = PC1, y = PC2,color=BOR)) +
 pca_plot1
 ```
 
+**The PCA did not reveal a clear separation between Responders and Non-responders, suggesting that treatment response is not the main driver of the global expression variability captured by PC1 and PC2.**
+
+We performed Principal Component Analysis using log2-transformed TPM values to explore the overall gene expression variability across the 192 samples.
+
+Before PCA, we removed genes with zero variance and centered the expression values.
+
+The first two principal components explained 16.2% and 9.8% of the total variance, respectively, accounting for 26% combined.
+
+We observed substantial overlap between Responders and Non-responders, with no clear separation based on treatment response.
+
+This suggests that treatment response is not the dominant source of variation captured by the first two principal components.
+
+However, the absence of clear clustering does not exclude differential expression between the two groups, which we subsequently investigated using DESeq2.
+
+| Ερώτηση | Τι απαντάμε |
+|----|----|
+| Why did you perform PCA? | To explore global expression variability, potential outliers and clustering by treatment response. |
+| Why use log2 TPM? | To use normalized expression values and reduce the influence of extremely high expression levels. |
+| Why transpose the matrix? | Because PCA requires samples as observations (rows) and genes as variables (columns). |
+| Why remove zero-variance genes? | They do not contribute to differences between samples. |
+| Why is there no clear separation? | Other biological or technical sources of variation may dominate the first two PCs. |
+| Does the overlap contradict DESeq2? | No. PCA explores global variation, whereas DESeq2 tests individual genes between predefined groups. |
+
 # DESeq2
 
 ### Prepare sample metadata
@@ -259,20 +471,44 @@ keep_dds<-rowSums(counts(dds))>=10
 dds_deseq_r<-dds[keep_dds,]
 ```
 
+```{r}
+keep_dds2<-rowSums(counts(dds))>=100
+dds_deseq_r2<-dds[keep_dds2,]
+```
+
+```{r}
+keep_dds3<-rowSums(counts(dds)>=10)>=5
+dds_deseq_r3<-dds[keep_dds3,]
+```
+
+```{r}
+keep_dds4<-rowSums(counts(dds)>=10)>=10
+dds_deseq_r4<-dds[keep_dds4,]
+```
+
 ### Run DESeq2
 
 ```{r}
 dds_after_deseq<-DESeq(dds_deseq_r)
+dds_after_deseq2<-DESeq(dds_deseq_r2)
+dds_after_deseq3<-DESeq(dds_deseq_r3)
+dds_after_deseq4<-DESeq(dds_deseq_r4)
 ```
 
 ### Results DESeq
 
 ```{r}
 res<-results(dds_after_deseq)
+res2<-results(dds_after_deseq2)
+res3<-results(dds_after_deseq3)
+res4<-results(dds_after_deseq4)
 ```
 
 ```{r}
 resultsNames(dds_after_deseq)
+resultsNames(dds_after_deseq2)
+resultsNames(dds_after_deseq3)
+resultsNames(dds_after_deseq4)
 ```
 
 ### Interpret results
@@ -282,9 +518,110 @@ summary(res)
 res_sig<-results(dds_after_deseq,alpha = 0.05)
 summary(res_sig)
 
+summary(res2)
+res_sig2<-results(dds_after_deseq2,alpha = 0.05)
+summary(res_sig2)
+
+summary(res3)
+res_sig3<-results(dds_after_deseq3,alpha = 0.05)
+summary(res_sig3)
+
+summary(res4)
+res_sig4<-results(dds_after_deseq4,alpha = 0.05)
+summary(res_sig4)
+
 ```
 
 ## Visualization
+
+```{r}
+res_list <- list(
+  "Total ≥10" = res,
+  "Total ≥100" = res2,
+  "≥10 in 5 samples" = res3,
+  "≥10 in 10 samples" = res4
+)
+```
+
+```{r}
+sig <- rownames(res)[!is.na(res$padj) & res$padj < 0.05]
+sig2 <- rownames(res2)[!is.na(res2$padj) & res2$padj < 0.05]
+sig3 <- rownames(res3)[!is.na(res3$padj) & res3$padj < 0.05]
+sig4 <- rownames(res4)[!is.na(res4$padj) & res4$padj < 0.05]
+length(Reduce(intersect, list(sig, sig2, sig3, sig4)))
+```
+
+```{r}
+deg_counts <- data.frame(
+  Filtering = names(res_list),
+  R = sapply(res_list, function(x)
+    sum(x$padj < 0.05 & x$log2FoldChange > 0, na.rm = TRUE)),
+  NR = sapply(res_list, function(x)
+    sum(x$padj < 0.05 & x$log2FoldChange < 0, na.rm = TRUE))
+)
+```
+
+```{r}
+deg_long <- deg_counts |>
+  tidyr::pivot_longer(
+    cols = c(R, NR),
+    names_to = "Response",
+    values_to = "DEGs"
+  )
+```
+
+```{r}
+barplot1<-ggplot(deg_long, aes(x = Filtering, y = DEGs, fill = Response)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Effect of Gene Prefiltering on Differential Expression",
+    x = "Prefiltering strategy",
+    y = "Number of significant DEGs",
+    fill = "Higher expression"
+  ) +
+  geom_text(
+  aes(label = DEGs),
+  position = position_dodge(width = 0.9),
+  vjust = -0.5,
+  size = 4
+) +
+  theme_minimal()
+barplot1
+```
+
+*Our differential expression results are highly robust to the choice of gene prefiltering, with 440 significant genes shared across all four strategies.*
+
+To assess the robustness of our differential expression results, we performed a sensitivity analysis using four different gene prefiltering strategies.
+
+We compared two total-count thresholds with two criteria requiring at least 10 counts in a minimum number of samples.
+
+Across the four strategies, the number of significant DEGs remained relatively stable, ranging from 444 to 457.
+
+Interestingly, the most stringent sample-based filtering identified slightly more DEGs, potentially due to changes in multiple-testing correction and independent filtering.
+
+More importantly, 440 genes remained significant across all four analyses, representing approximately 99% of the DEGs identified using our original filtering strategy.
+
+These results suggest that our differential expression findings are highly robust to the prefiltering thresholds tested.
+
+Why did you test four filtering strategies?
+
+To assess the sensitivity of our results to gene prefiltering.
+
+Why remove low-count genes?
+
+They often provide limited statistical information and can increase the multiple-testing burden.
+
+Why did stricter filtering yield more DEGs?
+
+Removing low-count genes can affect adjusted p-values and statistical power.
+
+Why is overlap important?
+
+Similar DEG counts do not necessarily mean the same genes were identified.
+
+Which filtering did you choose?
+
+The original total-count threshold ≥10, consistent with our course workflow.
 
 ```{r}
 res_df<-as.data.frame(res)|>
@@ -355,6 +692,40 @@ volcano_spec<-ggplot(res_df_2, aes(x = log2FoldChange, y = -log10(padj))) +
 volcano_spec
 ```
 
+**The volcano plot revealed significant gene expression differences between Responders and Non-responders, with a greater number of DEGs showing higher expression in Non-responders.**
+
+We used a volcano plot to visualize differential gene expression between Responders and Non-responders following anti-PD-L1 treatment.
+
+The X-axis represents the log2 fold change, indicating the magnitude and direction of differential expression, while the Y-axis represents the negative log10 adjusted p-value, indicating statistical significance.
+
+Genes with an adjusted p-value below 0.05 were considered statistically significant. Positive log2 fold changes indicate higher expression in Responders, whereas negative values indicate higher expression in Non-responders.
+
+We identified more significantly differentially expressed genes with higher expression in Non-responders than in Responders.
+
+Among the most statistically significant genes, ALB, FGB and HABP2 showed higher expression in Non-responders, whereas MYH15 and WDR87 showed higher expression in Responders.
+
+These results highlight differences in gene expression associated with treatment response, although they do not establish causal relationships.
+
+Why use a volcano plot?
+
+To visualize both the magnitude of differential expression and its statistical significance.
+
+Why use adjusted p-values?
+
+Because we test thousands of genes and need to control the false discovery rate.
+
+What does a negative log2FC mean?
+
+Higher estimated expression in NR than in R.
+
+Why do some genes have large log2FC but are grey?
+
+A large estimated difference does not necessarily provide sufficient statistical evidence.
+
+Are the top 10 genes the ones with the largest fold changes?
+
+No. We selected them based on the smallest adjusted p-values.
+
 ### Heatmap
 
 ```{r}
@@ -367,10 +738,6 @@ top20<-res_df %>%
   arrange(padj) %>% 
   slice_head(n=20)
 top20
-```
-
-```{r}
-top20[, c("gene", "log2FoldChange", "padj")]
 ```
 
 ```{r}
@@ -409,6 +776,20 @@ pheat<-pheatmap(
 )
 pheat
 ```
+
+**The heatmap supports the differential expression results by showing sample-level expression patterns of the top DE genes, with several genes exhibiting group-related trends, although with substantial inter-patient variability.**
+
+**Red means that a gene is relatively more highly expressed in that sample compared with its average across all samples, while blue means relatively lower expression.**
+
+**The heatmap visualizes the expression patterns of the top 20 significantly differentially expressed genes across all patient samples. Rows correspond to genes and columns correspond to samples, annotated by treatment response group. We used VST-transformed and row-scaled expression values, so red indicates relatively higher expression and blue relatively lower expression for a given gene across samples. The heatmap shows that several genes display distinct expression trends between responders and non-responders, although the separation is not complete, reflecting biological heterogeneity among patients.**
+
+We used the variance stabilizing transformation (VST) from DESeq2 because RNA-seq count data exhibit a mean-dependent variance, where highly expressed genes tend to have greater variability.
+
+VST uses DESeq2 normalization and its estimated mean-dispersion relationship to make the variance less dependent on expression levels.
+
+This makes the transformed data more suitable for visualization and clustering.
+
+We then applied row-wise Z-score scaling to highlight relative expression differences for each gene across the patient samples.
 
 ## Biological processes - GSEA
 
@@ -481,6 +862,10 @@ gsea_table<-plotGseaTable(
 gsea_table
 ```
 
+οι Responders εμφανίζουν enrichment διεργασιών που σχετίζονται με τον κυτταρικό κύκλο και τον μεταβολισμό του DNA. Οι Non-responders εμφανίζουν enrichment διεργασιών που σχετίζονται με κυτταρική προσκόλληση, μετακίνηση και αναδιαμόρφωση ιστών.
+
+Αυτό δημιουργεί ενδιαφέρουσες υποθέσεις για διαφορές στο tumor microenvironment, αλλά δεν αποδεικνύει ότι αυτές οι διεργασίες προκαλούν ανταπόκριση ή αντίσταση στην ανοσοθεραπεία.
+
 ```{r}
 enr1<-plotEnrichment(gene_sets[[head(fgsea_res[order(padj), ], 1)$pathway]],
 
@@ -491,6 +876,8 @@ enr1<-plotEnrichment(gene_sets[[head(fgsea_res[order(padj), ], 1)$pathway]],
 enr1
 ```
 
+**συλλογική τάση υψηλότερης έκφρασης cell-cycle-related genes στους R**.
+
 ```{r}
 enr2<-plotEnrichment(gene_sets[[head(fgsea_res[order(abs(NES)), ], 1)$pathway]],
                ranked_genes) +
@@ -498,6 +885,8 @@ enr2<-plotEnrichment(gene_sets[[head(fgsea_res[order(abs(NES)), ], 1)$pathway]],
   coord_cartesian(ylim = c(-0.6, 0.4)) # to keep it in the same axis as the most enriched for comparison
 enr2
 ```
+
+**τα γονίδια του pathway δεν παρουσιάζουν κάποιο ιδιαίτερα καθαρό μοτίβο συγκέντρωσης**
 
 ```{r}
 enr3<-plotEnrichment(gene_sets[[head(fgsea_res[size >= 50][order(abs(NES)), ], 1)$pathway]],
@@ -507,12 +896,18 @@ enr3<-plotEnrichment(gene_sets[[head(fgsea_res[size >= 50][order(abs(NES)), ], 1
 enr3
 ```
 
+Αυτό σημαίνει ότι τα γονίδια του pathway κατανέμονται σε διαφορετικά σημεία της ranked list. Δεν υπάρχει τόσο έντονο και μονοκατευθυντικό σήμα όσο στο cell cycle.
+
 ```{r}
 enr4<-plotEnrichment(gene_sets[[head(fgsea_res[ES < 0][order(padj), ], 1)$pathway]],
                ranked_genes) +
   labs(title = head(fgsea_res[ES < 0][order(padj), ], 1)$pathway)
 enr4
 ```
+
+Άρα βλέπουμε enrichment των genes που σχετίζονται με biological adhesion προς την πλευρά των **Non-responders**.
+
+Η biological adhesion περιλαμβάνει διεργασίες προσκόλλησης μεταξύ κυττάρων ή μεταξύ κυττάρων και του εξωκυττάριου περιβάλλοντος.
 
 ```{r}
 reactome_sets <- msigdbr(species = "Homo sapiens", category  = "C2", subcategory = "CP:REACTOME")
@@ -522,4 +917,116 @@ enr5<-plotEnrichment(reactome_sets[["REACTOME_FORMATION_OF_FIBRIN_CLOT_CLOTTING_
                ranked_genes) +
   labs(title = "Reactome pathway: Formation of fibrin clot / clotting cascade")
 enr5
+```
+
+Οι μαύρες κάθετες γραμμές συγκεντρώνονται περισσότερο προς το δεξί άκρο.
+
+**Αυτό δείχνει ισχυρό αρνητικό enrichment score, δηλαδή συγκέντρωση των συγκεκριμένων pathway genes προς τους NR.**
+
+Το pathway σχετίζεται με τον μηχανισμό πήξης του αίματος και τον σχηματισμό θρόμβου ινικής.
+
+Μπορεί να έχει ενδιαφέρον για την ερμηνεία του tumor microenvironment, ιδιαίτερα επειδή στο volcano plot είδαμε γονίδια όπως το `FGB` με υψηλότερη έκφραση στους NR.
+
+Collapsed
+
+```{r}
+sig_pathways <- fgsea_res |>
+  dplyr::filter(!is.na(padj), padj < 0.05) |>
+  dplyr::arrange(padj)
+```
+
+```{r}
+nrow(sig_pathways)
+```
+
+```{r}
+sig_pathways_100 <- sig_pathways |>
+  dplyr::arrange(padj) |>
+  dplyr::slice_head(n = 100)
+
+set.seed(42)
+
+collapsedPathways <- collapsePathways(
+  sig_pathways_100,
+  gene_sets,
+  ranked_genes
+)
+```
+
+```{r}
+mainPathways <- sig_pathways_100 |>
+  dplyr::filter(pathway %in% collapsedPathways$mainPathways) |>
+  dplyr::arrange(padj)
+```
+
+```{r}
+nrow(mainPathways)
+
+mainPathways |>
+  dplyr::select(pathway, NES, padj) |>
+  head(20)
+```
+
+Στις εικόνες σου βλέπουμε ότι τα σημαντικότερα main pathways εξακολουθούν να σχετίζονται κυρίως με:
+
+-   **Responders:** Cell cycle, DNA repair, chromosome segregation και DNA replication.
+
+-   **Non-responders:** Biological adhesion, tissue development, tube development και circulatory system development.
+
+Άρα διατηρείται η ίδια γενική βιολογική εικόνα που είδαμε στο αρχικό GSEA.
+
+```{r}
+mainPathways |>
+  summarise(
+    R = sum(NES > 0),
+    NR = sum(NES < 0)
+  )
+```
+
+```{r}
+top_R <- mainPathways |>
+  filter(NES > 0) |>
+  slice_min(padj, n = 5)
+
+top_NR <- mainPathways |>
+  filter(NES < 0) |>
+  slice_min(padj, n = 5)
+
+top_main <- bind_rows(top_R, top_NR)
+top_main
+```
+
+**Στους Responders**, το enrichment σχετίζεται περισσότερο με κυτταρικό πολλαπλασιασμό και DNA-related processes.
+
+**Στους Non-responders**, σχετίζεται περισσότερο με tissue organization, adhesion και vascular development.
+
+Αυτές οι διεργασίες θα μπορούσαν να σχετίζονται με διαφορές στο tumor microenvironment και την ανταπόκριση στην ανοσοθεραπεία, αλλά χρειαζόμαστε προσεκτική ερμηνεία.
+
+```{r}
+top_main <- top_main |>
+  mutate(
+    Response = if_else(NES > 0, "R", "NR"),
+    pathway_label = gsub("_", " ", sub("^GOBP_", "", pathway))
+  )
+```
+
+```{r}
+collapsed<-ggplot(top_main,
+       aes(x = reorder(pathway_label, NES),
+           y = NES,
+           fill = Response)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c(
+    "R" = "firebrick",
+    "NR" = "steelblue"
+  )) +
+  labs(
+    title = "Top 10 Representative Biological Processes",
+    x = "Biological process",
+    y = "Normalized Enrichment Score (NES)",
+    fill = "Enriched towards"
+  ) +
+  theme_minimal()
+collapsed
 ```
