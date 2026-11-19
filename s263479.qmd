@@ -553,7 +553,7 @@ dds<-DESeqDataSetFromMatrix(
 
 ```{r}
 keep_dds1<-rowSums(counts(dds))>=10
-dds_deseq_r1<-dds[keep_dds,]
+dds_deseq_r1<-dds[keep_dds1,]
 ```
 
 ### Setting - 2: keep genes with at least 100 counts for each sample
