@@ -243,7 +243,8 @@ p1_all
 ```{r}
 p2_all <- ggplot(counts_long, aes(x = log2(expression+1))) +
   geom_histogram(bins = 50, fill = "cyan",
-                 colour = "black") +
+                 colour = "black",
+                 linewidth = 0.3) +
   labs(
     title = "Distribution of raw counts",
     x = "Raw counts",
@@ -799,7 +800,7 @@ heatmap_matrix <-log_counts[top20$gene, ]
 dim(heatmap_matrix)
 ```
 
-The code prepares the expression data of your 20 most statistically significant differentially expressed genes for heatmap visualization.
+The code prepares the expression data of our 20 most statistically significant differentially expressed genes for heatmap visualization.
 
 ```{r}
 annotation_col <- data.frame(
@@ -812,7 +813,7 @@ heatmap_matrix <- heatmap_matrix[, sample_order]
 annotation_col <- annotation_col[sample_order, , drop = FALSE]
 ```
 
-This code prepares the clinical annotation for your heatmap and arranges the samples according to their treatment response (NR or R).
+This code prepares the clinical annotation for our heatmap and arranges the samples according to their treatment response (NR or R).
 
 ```{r}
 pheat<-pheatmap(
@@ -831,16 +832,16 @@ pheat
 
 The heatmap of the top 20 differentially expressed genes reveals distinct gene expression patterns between responders and non-responders. Several genes exhibit relatively higher expression in one response group compared with the other, consistent with the differential expression analysis. However, considerable inter-patient variability remains within both groups, indicating heterogeneity in their gene expression profiles.
 
-## Biological processes - GSEA
+# Biological processes - GSEA
 
-### Load libraries
+## Load libraries
 
 ```{r}
 library(msigdbr)
 library(fgsea)
 ```
 
-### Rank genes
+## Rank genes
 
 ```{r}
 ranked_genes <- res$stat
@@ -852,7 +853,7 @@ ranked_genes <- ranked_genes[names(ranked_genes) != ""]
 
 Prepares a named vector of gene statistics for Gene Set Enrichment Analysis (GSEA), using your DESeq2 results.
 
-### Run fgsea against MSigDB gene sets
+## Run fgsea against MSigDB gene sets
 
 ```{r}
 gene_sets <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "BP") 
@@ -864,7 +865,7 @@ fgsea_res <- fgsea(pathways = gene_sets,
                    nPermSimple = 10000) # raise from the default 1000 to resolve more pathway p-values
 ```
 
-### **Visualize the enriched pathways**
+## **Visualize the enriched pathways**
 
 ```{r}
 topPathways <- fgsea_res  |>
@@ -885,7 +886,7 @@ pathways
 
 The GSEA results show that the top five enriched pathways are mainly associated with DNA repair, chromosome organization and cell cycle regulation. All five pathways have positive normalized enrichment scores (NES \> 2), indicating enrichment in responders compared with non-responders.
 
-### **GSEA table**
+## **GSEA table**
 
 ```{r}
 number_of_top_pathways_up <- 10
@@ -1036,7 +1037,7 @@ Several limitations should be considered when interpreting the differential gene
 
 -   **Technical variability:** Differences in sample preparation, sequencing depth, RNA quality and batch effects may introduce unwanted variation into the data.
 
--   **Size of the groups**
+-   **Size of the groups:**
 
 # **Why differential expression does not imply causation**
 
