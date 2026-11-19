@@ -253,15 +253,159 @@ p2_all <- ggplot(counts_long, aes(x = log2(expression+1))) +
 p2_all
 ```
 
+#### TPM-normalized data
+
+#### Repeat the 2 plots for TPM
+
+```{r}
+tpm_long <- tpm_df %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "sample_id",
+    values_to = "expression"
+  )
+```
+
+```{r}
+p3_all <- ggplot(tpm_long, aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "TPM counts",
+    x = "TPM count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p3_all
+```
+
+```{r}
+p4_all<-tpm_long|>
+  ggplot(aes(x=log2(expression+1)))+
+  geom_histogram(
+    bins=50,
+    fill = 'cyan',
+    color = 'black',
+    linewidth = 0.3
+  ) +
+  labs(
+    title = 'Log-2 transformed TPM counts',
+    x='log2 (TPM counts + 1)',
+    y='Number of genes'
+  )+
+  theme_minimal()
+p4_all
+```
+
 ### Compare all four distributions
 
 ```{r}
-com_plot2_all<-grid.arrange(p1_all, p2_all, p3, p4, ncol = 2)
+com_plot2_all<-grid.arrange(p1_all, p2_all, p3_all, p4_all, ncol = 2)
 ```
 
-## Principal component analysis (PCA)
+## 3.Non-zero distributions for a random sample
 
-### log2 transform
+### Raw data
+
+```{r}
+p1_non_zero <- df_counts %>% 
+   dplyr::filter(expression > 0) %>%
+  ggplot(aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Non-zero raw counts",
+    subtitle = sample_id,
+    x = "Raw count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p1_non_zero
+```
+
+#### Log2-transformed raw counts for all samples
+
+```{r}
+p2_non_zero<-df_counts |>
+   dplyr::filter(expression > 0) %>%
+  ggplot(aes(x=log2(expression)))+
+  geom_histogram(
+    bins=50,
+    fill='cyan',
+    color='black',
+    linewidth = 0.3
+  )+
+  labs(title='Log2-transformed non-zero raw counts',
+       subtitle = sample_id,
+       x="log2(raw count)",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+
+p2_non_zero
+```
+
+#### TPM-normalized data
+
+#### Repeat the 2 plots for TPM
+
+```{r}
+p3_non_zero <- df_tpm %>% 
+   dplyr::filter(expression > 0) %>%
+  ggplot(aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "TPM non-zero counts",
+    subtitle = sample_id,
+    x = "TPM count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p3_non_zero
+```
+
+```{r}
+p4_non_zero<-df_tpm|>
+   dplyr::filter(expression > 0) %>%
+  ggplot(aes(x=log2(expression)))+
+  geom_histogram(
+    bins=50,
+    fill = 'cyan',
+    color = 'black',
+    linewidth = 0.3
+  ) +
+  labs(
+    title = 'Log-2 transformed TPM non-zero counts',
+    subtitle = sample_id,
+    x='log2 (TPM counts)',
+    y='Number of genes'
+  )+
+  theme_minimal()
+p4_non_zero
+```
+
+### Compare all four non-zero distributions
+
+```{r}
+com_plot3<-grid.arrange(p1_non_zero, p2_non_zero, p3_non_zero, p4_non_zero, ncol = 2)
+```
+
+# Principal component analysis (PCA)
+
+## Log2 transform
 
 ```{r}
 ## We center the log2-transformed FPKM data but do not scale genes to 
@@ -272,7 +416,7 @@ com_plot2_all<-grid.arrange(p1_all, p2_all, p3, p4, ncol = 2)
 tpm_df_logt<-log2(tpm_df+1)
 ```
 
-### Remove genes with zero variance
+## Remove genes with zero variance
 
 ```{r}
 keep_count <- apply(tpm_df_logt, 1, sd)>1 # sd ~ standard deviation
@@ -281,7 +425,7 @@ tpm_counts_pca<-tpm_df_logt[keep_count,]
 
 -   tpm_counts_pca: log2 transformed data without the genes with zero values
 
-**Principal Component Analysis on tpm_counts_pca**
+## **Principal Component Analysis on tpm_counts_pca**
 
 ```{r}
 pca_count<-prcomp(
@@ -307,13 +451,13 @@ summary(pca_count)$importance[,1:7]
 
 -   Cumulative Proportion: The total variation explained by all components up to that point.
 
-**Calculating the variance**
+## **Calculating the variance**
 
 ```{r}
 var_TPM <- 100 * pca_count$sdev^2 / sum(pca_count$sdev^2)
 ```
 
-### Plot PC1 and PC2 with metadata
+## Plot PC1 and PC2 with metadata
 
 ```{r}
 df_pca_tpm <- data.frame(
@@ -324,7 +468,7 @@ df_pca_tpm <- data.frame(
 
 Creates a data frame containing the coordinates of each sample along PC1 and PC2, which you can then use to create a PCA plot.
 
-#### match sample id
+## Match sample ID
 
 ```{r}
 sample_match<-match(
@@ -340,7 +484,7 @@ Checks whether the sample IDs in your PCA data frame match the sample IDs in you
 
 By combining this information with your PCA results, you can investigate whether these factors are associated with differences in gene expression.
 
-#### add label for responding
+## Add label for responding
 
 ```{r}
 df_pca_tpm$BOR<-factor(clinical_df$BOR[sample_match])
@@ -368,7 +512,7 @@ This suggests that treatment response is not clearly associated with the dominan
 
 # Differencial Gene Expression Analysis (DESeq2)
 
-### Prepare sample metadata
+## Prepare sample metadata
 
 ```{r}
 library(DESeq2)
@@ -394,7 +538,7 @@ identical(
 
 Ensures that your gene expression count matrix and clinical metadata contain the same samples in exactly the same order.
 
-### Create DESeq2
+## Create DESeq2 object
 
 ```{r}
 dds<-DESeqDataSetFromMatrix(
@@ -404,39 +548,89 @@ dds<-DESeqDataSetFromMatrix(
   )
 ```
 
+### Setting - 1: keep genes with at least 10 counts for each sample
+
 ```{r}
-keep_dds<-rowSums(counts(dds))>=10
-dds_deseq_r<-dds[keep_dds,]
+keep_dds1<-rowSums(counts(dds))>=10
+dds_deseq_r1<-dds[keep_dds,]
+```
+
+### Setting - 2: keep genes with at least 100 counts for each sample
+
+```{r}
+keep_dds2<-rowSums(counts(dds))>=100
+dds_deseq_r2<-dds[keep_dds2,]
+```
+
+### Setting - 3: keep genes with at least 10 counts for at least 5 sample
+
+```{r}
+keep_dds3<-rowSums(counts(dds)>=10)>=5
+dds_deseq_r3<-dds[keep_dds3,]
+```
+
+### Setting - 4: keep genes with at least 10 counts for at least 10 sample
+
+```{r}
+keep_dds4<-rowSums(counts(dds)>=10)>=10
+dds_deseq_r4<-dds[keep_dds4,]
 ```
 
 Performs pre-filtering of lowly expressed genes before differential gene expression analysis with DESeq2.
 
-### Run DESeq2
+## Run DESeq2 for all 4 settings
 
 ```{r}
-dds_after_deseq<-DESeq(dds_deseq_r)
+dds_after_deseq1<-DESeq(dds_deseq_r1)
+dds_after_deseq2<-DESeq(dds_deseq_r2)
+dds_after_deseq3<-DESeq(dds_deseq_r3)
+dds_after_deseq4<-DESeq(dds_deseq_r4)
 ```
 
-### Results DESeq
+## Results DESeq
 
 ```{r}
-res<-results(dds_after_deseq)
+res1<-results(dds_after_deseq1)
+res2<-results(dds_after_deseq2)
+res3<-results(dds_after_deseq3)
+res4<-results(dds_after_deseq4)
 ```
 
 ```{r}
-resultsNames(dds_after_deseq)
+resultsNames(dds_after_deseq1)
+resultsNames(dds_after_deseq2)
+resultsNames(dds_after_deseq3)
+resultsNames(dds_after_deseq4)
 ```
 
-### Interpret results
+## Interpret results
+
+### Main (first) setting
 
 ```{r}
-summary(res)
+summary(res1)
 res_sig<-results(dds_after_deseq,alpha = 0.05)
 summary(res_sig)
 
 ```
 
-### Interpretation of values with the treshold: p-value\<0.05
+### Other three settings
+
+```{r}
+summary(res2)
+res_sig2<-results(dds_after_deseq2,alpha = 0.05)
+summary(res_sig2)
+
+summary(res3)
+res_sig3<-results(dds_after_deseq3,alpha = 0.05)
+summary(res_sig3)
+
+summary(res4)
+res_sig4<-results(dds_after_deseq4,alpha = 0.05)
+summary(res_sig4)
+```
+
+## Interpretation of values with the treshold: p-value\<0.05 for the main setting
 
 -   Upregulated genes: 167
 
@@ -446,14 +640,71 @@ summary(res_sig)
 
 ## Visualization
 
-```{r}
-res_df<-as.data.frame(res)|>
-  mutate(significant=padj<0.05)
-```
-
 Converts your DESeq2 results into a data frame and adds a new column indicating whether each gene is statistically significantly differentially expressed.
 
-### Volcano Plot
+```{r}
+res_list <- list(
+  "Total ≥10" = res,
+  "Total ≥100" = res2,
+  "≥10 in 5 samples" = res3,
+  "≥10 in 10 samples" = res4
+)
+```
+
+```{r}
+sig <- rownames(res)[!is.na(res$padj) & res$padj < 0.05]
+sig2 <- rownames(res2)[!is.na(res2$padj) & res2$padj < 0.05]
+sig3 <- rownames(res3)[!is.na(res3$padj) & res3$padj < 0.05]
+sig4 <- rownames(res4)[!is.na(res4$padj) & res4$padj < 0.05]
+length(Reduce(intersect, list(sig, sig2, sig3, sig4)))
+```
+
+```{r}
+deg_counts <- data.frame(
+  Filtering = names(res_list),
+  R = sapply(res_list, function(x)
+    sum(x$padj < 0.05 & x$log2FoldChange > 0, na.rm = TRUE)),
+  NR = sapply(res_list, function(x)
+    sum(x$padj < 0.05 & x$log2FoldChange < 0, na.rm = TRUE))
+)
+```
+
+```{r}
+deg_long <- deg_counts |>
+  tidyr::pivot_longer(
+    cols = c(R, NR),
+    names_to = "Response",
+    values_to = "DEGs"
+  )
+```
+
+### Bar Plot
+
+```{r}
+barplot_all_settings<-ggplot(deg_long, aes(x = Filtering, y = DEGs, fill = Response)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Effect of Gene Prefiltering on Differential Expression",
+    x = "Prefiltering strategy",
+    y = "Number of significant DEGs",
+    fill = "Higher expression"
+  ) +
+  geom_text(
+  aes(label = DEGs),
+  position = position_dodge(width = 0.9),
+  vjust = -0.5,
+  size = 4
+) +
+  theme_minimal()
+barplot_all_settings
+```
+
+### Volcano Plot for main setting
+
+```{r}
+res_df<-as.data.frame(res1)|>
+  mutate(significant=padj<0.05)
+```
 
 ```{r}
 volcano<-res_df|>
@@ -541,11 +792,10 @@ top20[, c("gene", "log2FoldChange", "padj")]
 ```
 
 ```{r}
-vsd <- vst(dds_after_deseq, blind = FALSE)
+norm_counts<-counts(dds_after_deseq,normalized=TRUE)
+log_counts<-log2(norm_counts+1)
 
-vst_matrix <- assay(vsd)
-
-heatmap_matrix <- vst_matrix[top20$gene, ]
+heatmap_matrix <-log_counts[top20$gene, ]
 dim(heatmap_matrix)
 ```
 
