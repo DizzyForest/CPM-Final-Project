@@ -769,7 +769,7 @@ mainPathways <- fgsea_res[
 ```
 
 ```{r}
-length(mainPathways)
+nrow(mainPathways)
 ```
 
 Many of the original pathways share genes and capture similar biological processes. `collapsePathways()` identified pathways whose enrichment could be explained by other, more significant pathways.
@@ -783,6 +783,8 @@ Several limitations should be considered when interpreting the differential gene
 -   **Potential confounding factors:** Differences in age, sex, disease stage, previous treatments and other clinical characteristics may influence both gene expression and treatment response. If these variables are not included in the DESeq2 design, their effects cannot be separated from those associated with treatment response.
 
 -   **Technical variability:** Differences in sample preparation, sequencing depth, RNA quality and batch effects may introduce unwanted variation into the data.
+
+-   **Size of the groups**
 
 # **Why differential expression does not imply causation**
 
