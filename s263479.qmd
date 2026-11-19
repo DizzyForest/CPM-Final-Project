@@ -87,7 +87,9 @@ summary(as.numeric(as.matrix(counts_df)))
 
 -   number of non-responders: 167
 
-## 1.Explore raw count distribution for one sample
+## 1.Explore distribution for one sample
+
+### RAW data
 
 ```{r}
 sample_id <- colnames(counts_df)[10]
@@ -104,7 +106,7 @@ We chose a random (10th) sample to visualize its distribution.
 
 -   df_counts: the expression values in one sample
 
-### Make a histogram with raw data for one sample
+#### Make a histogram with raw data for one sample
 
 ```{r}
 p1 <- ggplot(df_counts, aes(x = expression)) +
@@ -124,7 +126,7 @@ p1 <- ggplot(df_counts, aes(x = expression)) +
 p1
 ```
 
-### Log2-transformed raw counts for one sample
+#### Log2-transformed raw counts for one sample
 
 We normalize raw RNA-seq counts because raw counts do not only reflect gene expression levels. They are also influenced by technical factors such as gene length and sequencing depth. TPM stands for Transcripts Per Million and accounts for both of these factors.
 
@@ -151,7 +153,7 @@ p2
 com_plot1<-grid.arrange(p1,p2,ncol=2)
 ```
 
-## Explore normalized expression
+### TPM-normalized data
 
 ```{r}
 df_tpm<-data.frame(
@@ -159,7 +161,7 @@ df_tpm<-data.frame(
 )
 ```
 
-### Repeat the 2 plots for TPM
+#### Repeat the 2 plots for TPM
 
 ```{r}
 p3 <- ggplot(df_tpm, aes(x = expression)) +
@@ -198,7 +200,7 @@ p4<-df_tpm|>
 p4
 ```
 
-## Compare all four distributions
+### Compare all four distributions
 
 ```{r}
 com_plot2<-grid.arrange(p1, p2, p3, p4, ncol = 2)
@@ -217,7 +219,7 @@ counts_long <- counts_df %>%
   )
 ```
 
-### Make a histogram with raw data for all samples
+### Raw data
 
 ```{r}
 p1_all <- ggplot(counts_long, aes(x = expression)) +
@@ -236,7 +238,7 @@ p1_all <- ggplot(counts_long, aes(x = expression)) +
 p1_all
 ```
 
-### Log2-transformed raw counts for all samples
+#### Log2-transformed raw counts for all samples
 
 ```{r}
 p2_all <- ggplot(counts_long, aes(x = log2(expression+1))) +
@@ -251,7 +253,7 @@ p2_all <- ggplot(counts_long, aes(x = log2(expression+1))) +
 p2_all
 ```
 
-## Compare all four distributions
+### Compare all four distributions
 
 ```{r}
 com_plot2_all<-grid.arrange(p1_all, p2_all, p3, p4, ncol = 2)
