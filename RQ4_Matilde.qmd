@@ -1,0 +1,431 @@
+---
+title: "RQ4_Matilde"
+format:
+  html:
+    embed-resources: true
+editor: visual
+---
+
+## Research question
+
+In this research question, we investigate how tumor purity might influence the expression of immune-related biomarkers and their observed associations with treatment response.
+
+Tumor purity refers to the proportion of cancer cells in a tumor sample. Bulk RNA-sequencing measures gene expression from all cells in a sample, including cancer cells, immune cells and stromal cells. Therefore, differences in the cellular composition of tumor samples can influence the measured expression of immune-related genes.
+
+We investigate this by estimating tumor purity using the ESTIMATE method. We then examine its relationship with PDCD1 expression and the T-cell-inflamed GEP score calculated in RQ2. Finally, we investigate how adjusting gene expression for tumor purity affects these biomarkers.
+
+```{r}
+imvigor  <- readRDS("IMvigor210_plain.rds")
+tpm      <- as.matrix(imvigor$tpm)
+clinical <- as.data.frame(imvigor$clinical)
+library(ggplot2)
+library(limma)
+```
+
+```{r}
+# Load previously calculated GEP scores from RQ2.
+RQ2_results <- readRDS(
+  "RQ2_results/RQ2_GEP_and_ssGSEA_scores_for_RQ3.rds"
+)
+
+# Inspect the saved results.
+head(RQ2_results)
+
+# Check available variables.
+colnames(RQ2_results)
+```
+
+```{r}
+# Extract PDCD1 expression for the samples in RQ2.
+PDCD1 <- as.numeric(
+  tpm["PDCD1", RQ2_results$sample_id]
+)
+
+# Add PDCD1 expression to the existing results.
+RQ4_data <- RQ2_results
+
+RQ4_data$PDCD1 <- PDCD1
+```
+
+```{r}
+# Inspect clinical variables related to purity.
+grep(
+  "purity|estimate|immune|stromal",
+  colnames(imvigor$clinical),
+  ignore.case = TRUE,
+  value = TRUE
+)
+```
+
+```{r}
+library(immunedeconv)
+
+# Estimate tumor purity from the full TPM matrix.
+purity <- deconvolute_estimate(tpm)
+
+# Extract TumorPurity.
+tumor_purity <- as.numeric(
+  purity["TumorPurity", ]
+)
+
+names(tumor_purity) <- colnames(purity)
+```
+
+```{r}
+# Match tumor purity to the samples in RQ4_data.
+RQ4_data$TumorPurity <- tumor_purity[
+  RQ4_data$sample_id
+]
+
+# Check the resulting dataset.
+head(RQ4_data)
+summary(RQ4_data$TumorPurity)
+```
+
+ESTIMATE successfully produced tumor-purity estimates for the IMvigor210 samples. The median estimated tumor purity was 0.652, with values ranging from 0.299 to 0.959. This indicates substantial variation in tumor purity across the samples, which could influence the expression of immune-related biomarkers measured using bulk RNA-seq.
+
+## **Compare tumor purity between responders and non-responders**
+
+The median tumor purity was slightly higher in non-responders (0.656) than in responders (0.628). However, the difference was not statistically significant (Wilcoxon rank-sum test, *p* = 0.173). Therefore, we did not find strong evidence that tumor purity differed between the two treatment response groups. This suggests that differences in overall tumor purity alone may not explain the observed associations between immune-related biomarkers and treatment response. However, tumor purity may still influence the expression measurements within individual samples.
+
+```{r}
+# Compare tumor purity between response groups.
+purity_Response_test <- wilcox.test(
+  TumorPurity ~ Response,
+  data = RQ4_data
+)
+
+# Calculate median tumor purity for each group.
+purity_medians <- aggregate(
+  TumorPurity ~ Response,
+  data = RQ4_data,
+  median
+)
+
+# Display the results.
+print(purity_medians)
+
+purity_Response_test
+```
+
+```{r}
+# Helper function from Exercise 6.
+plot_Response_boxplot <- function(data, variable, y_label, test_result) {
+  ggplot(data, aes(x = Response, y = .data[[variable]])) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(width = 0.12, alpha = 0.6) +
+    annotate(
+      "text",
+      x = Inf, y = Inf,
+      label = paste0("p = ", signif(test_result$p.value, 3)),
+      hjust = 1.1, vjust = 1.5
+    ) +
+    labs(
+      x = "Response class",
+      y = y_label
+    ) +
+    theme_minimal()
+}
+
+# Plot tumor purity by response group.
+plot_Response_boxplot(
+  RQ4_data,
+  "TumorPurity",
+  "Estimated tumor purity",
+  purity_Response_test
+)
+```
+
+## **Investigate the relationship between tumor purity and immune-related biomarkers**
+
+We next investigated whether estimated tumor purity was associated with PDCD1 expression and the T-cell-inflamed GEP score. Because these variables are continuous and their relationships are not necessarily linear, we used Spearman rank correlation, following Exercise 6. Spearman correlation measures the strength and direction of a monotonic relationship between two variables.
+
+```{r}
+# Correlation between tumor purity and PDCD1 expression.
+PDCD1_purity_cor <- cor.test(
+  RQ4_data$TumorPurity,
+  RQ4_data$PDCD1,
+  method = "spearman",
+  exact = FALSE,
+  use = "complete.obs"
+)
+
+PDCD1_purity_cor
+```
+
+```{r}
+# Correlation between tumor purity and GEP score.
+GEP_purity_cor <- cor.test(
+  RQ4_data$TumorPurity,
+  RQ4_data$GEP_score,
+  method = "spearman",
+  exact = FALSE,
+  use = "complete.obs"
+)
+
+GEP_purity_cor
+```
+
+```{r}
+# Helper function from Exercise 6.
+plot_association <- function(data, x, y, x_label, y_label, cor_test) {
+  rho <- unname(cor_test$estimate)
+
+  ggplot(data, aes(x = .data[[x]], y = .data[[y]])) +
+    geom_point(alpha = 0.7) +
+    geom_smooth(method = "lm", se = FALSE) +
+    annotate(
+      "text",
+      x = Inf, y = Inf,
+      label = paste0(
+        "Spearman rho = ", round(rho, 2),
+        "\np = ", signif(cor_test$p.value, 3)
+      ),
+      hjust = 1.1, vjust = 1.3
+    ) +
+    labs(
+      x = x_label,
+      y = y_label
+    ) +
+    theme_minimal()
+}
+
+# Tumor purity and PDCD1.
+plot_association(
+  RQ4_data,
+  "TumorPurity",
+  "PDCD1",
+  "Estimated tumor purity",
+  "PDCD1 expression",
+  PDCD1_purity_cor
+)
+
+# Tumor purity and GEP.
+plot_association(
+  RQ4_data,
+  "TumorPurity",
+  "GEP_score",
+  "Estimated tumor purity",
+  "T-cell-inflamed GEP score",
+  GEP_purity_cor
+)
+```
+
+We first investigated whether tumor purity differed between responders and non-responders. The median tumor purity was slightly higher in non-responders (0.656) than in responders (0.628). However, the difference was not statistically significant (Wilcoxon rank-sum test, *p* = 0.173). Therefore, we did not find strong evidence that tumor purity differed between the two treatment response groups. This suggests that differences in overall tumor purity alone may not explain the observed associations between immune-related biomarkers and treatment response.
+
+### **Interpretation of the correlations**
+
+Both PDCD1 expression and the T-cell-inflamed GEP score showed strong negative correlations with tumor purity. PDCD1 had a Spearman correlation coefficient of −0.691 (*p* = 1.35 × 10⁻²⁸), while GEP showed an even stronger negative correlation of −0.771 (*p* = 4.31 × 10⁻³⁹). These findings suggest that both immune-related biomarkers are associated with the cellular composition of tumor samples. A possible explanation is that samples with lower tumor purity contain a larger proportion of non-tumor cells, including infiltrating immune cells. Since PDCD1 and many genes included in the GEP are associated with immune activity, their measured expression may increase when a sample contains more immune cells. The stronger correlation observed for GEP may reflect that it combines information from several immune-related genes rather than relying on a single gene. However, we have not formally tested whether the two correlations differ significantly. Overall, these results demonstrate that tumor purity is an important consideration when interpreting immune-related biomarkers measured using bulk RNA-sequencing.
+
+## **Adjust gene expression for tumor purity**
+
+To investigate how tumor purity influences the immune-related biomarkers, we adjusted the gene-expression matrix for estimated tumor purity using the `removeBatchEffect()` function from the `limma` package. This method removes the linear component of gene expression associated with tumor purity. We then extracted PDCD1 expression and recalculated the T-cell-inflamed GEP score using the same 18 genes and scoring method as in RQ2. We compared the adjusted biomarker values between responders and non-responders to investigate whether the associations with treatment response changed after accounting for tumor purity.
+
+```{r}
+# Match the expression matrix to the sample order in RQ4_data.
+tpm_rq4 <- tpm[, RQ4_data$sample_id, drop = FALSE]
+
+# Verify sample alignment.
+stopifnot(identical(
+  colnames(tpm_rq4),
+  RQ4_data$sample_id
+))
+
+# Apply log2 transformation.
+expr_log <- log2(tpm_rq4 + 1)
+```
+
+```{r}
+# Adjust gene expression for tumor purity.
+expr_adjusted <- removeBatchEffect(
+  expr_log,
+  covariates = matrix(RQ4_data$TumorPurity, ncol = 1)
+)
+```
+
+```{r}
+# Extract purity-adjusted PDCD1 expression.
+PDCD1_adjusted <- as.numeric(
+  expr_adjusted["PDCD1", ]
+)
+```
+
+```{r}
+# The same 18 GEP genes used in RQ2.
+GEP_genes <- c(
+  "CCL5", "CD27", "CD274", "CD276", "CD8A", "CMKLR1",
+  "CXCL9", "CXCR6", "HLA-DQA1", "HLA-DRB1", "HLA-E",
+  "IDO1", "LAG3", "NKG7", "PDCD1LG2", "PSMB10",
+  "STAT1", "TIGIT"
+)
+
+# Check that all genes are present.
+stopifnot(all(GEP_genes %in% rownames(expr_adjusted)))
+
+# Extract adjusted GEP gene expression.
+GEP_expr_adjusted <- expr_adjusted[
+  GEP_genes,
+  ,
+  drop = FALSE
+]
+
+# Standardize each gene across samples.
+GEP_expr_adjusted_scaled <- t(
+  scale(t(GEP_expr_adjusted))
+)
+
+# Calculate the adjusted GEP score.
+GEP_scores_adjusted <- colMeans(
+  GEP_expr_adjusted_scaled
+)
+```
+
+```{r}
+# Copy the original RQ4 results.
+RQ4_adjusted <- RQ4_data
+
+# Replace the original biomarkers with their adjusted values.
+RQ4_adjusted$PDCD1 <- PDCD1_adjusted
+
+RQ4_adjusted$GEP_score <- GEP_scores_adjusted
+
+# Verify sample alignment.
+stopifnot(identical(
+  colnames(expr_adjusted),
+  RQ4_adjusted$sample_id
+))
+
+# Inspect the adjusted results.
+head(RQ4_adjusted)
+```
+
+```{r}
+# Compare adjusted PDCD1 expression between response groups.
+PDCD1_Response_adjusted_test <- wilcox.test(
+  PDCD1 ~ Response,
+  data = RQ4_adjusted
+)
+
+# Compare adjusted GEP scores between response groups.
+GEP_Response_adjusted_test <- wilcox.test(
+  GEP_score ~ Response,
+  data = RQ4_adjusted
+)
+
+# Display the results.
+PDCD1_Response_adjusted_test
+
+GEP_Response_adjusted_test
+```
+
+```{r}
+# Adjusted PDCD1 expression.
+plot_Response_boxplot(
+  RQ4_adjusted,
+  "PDCD1",
+  "Purity-adjusted PDCD1 expression",
+  PDCD1_Response_adjusted_test
+)
+
+# Adjusted GEP score.
+plot_Response_boxplot(
+  RQ4_adjusted,
+  "GEP_score",
+  "Purity-adjusted T-cell-inflamed GEP score",
+  GEP_Response_adjusted_test
+)
+```
+
+**Initial interpretation of the purity-adjusted results**
+
+After adjusting gene expression for tumor purity, both PDCD1 expression and the T-cell-inflamed GEP score remained significantly different between responders and non-responders. The Wilcoxon rank-sum test gave a p-value of 0.00166 for PDCD1 and 2.08 × 10⁻⁵ for GEP. This suggests that the associations between these biomarkers and treatment response are not entirely explained by variation in tumor purity. However, tumor-purity adjustment does not necessarily improve the interpretation of these biomarkers. PDCD1 and the GEP partly reflect immune-cell infiltration, which may itself be biologically relevant to immunotherapy response. Therefore, removing purity-associated expression may also remove meaningful biological information.
+
+```{r}
+# Unadjusted PDCD1 expression on the log2 scale.
+RQ4_data$PDCD1_log <- as.numeric(
+  expr_log["PDCD1", RQ4_data$sample_id]
+)
+
+# Unadjusted response tests.
+PDCD1_before_test <- wilcox.test(
+  PDCD1_log ~ Response,
+  data = RQ4_data
+)
+
+GEP_before_test <- wilcox.test(
+  GEP_score ~ Response,
+  data = RQ4_data
+)
+
+# Calculate medians before adjustment.
+PDCD1_before <- aggregate(
+  PDCD1_log ~ Response,
+  RQ4_data,
+  median
+)
+
+GEP_before <- aggregate(
+  GEP_score ~ Response,
+  RQ4_data,
+  median
+)
+
+# Calculate medians after adjustment.
+PDCD1_after <- aggregate(
+  PDCD1 ~ Response,
+  RQ4_adjusted,
+  median
+)
+
+GEP_after <- aggregate(
+  GEP_score ~ Response,
+  RQ4_adjusted,
+  median
+)
+
+# Display results.
+PDCD1_before
+PDCD1_after
+
+GEP_before
+GEP_after
+
+PDCD1_before_test
+GEP_before_test
+```
+
+### **Comparison before and after tumor-purity adjustment**
+
+To investigate the influence of tumor purity on the associations between immune-related biomarkers and treatment response, we compared the biomarker distributions before and after adjustment. Before adjustment, PDCD1 expression was significantly higher in responders than in non-responders (median 1.197 compared with 0.590, Wilcoxon *p* = 0.000396). After adjustment, the difference remained statistically significant (median 2.797 compared with 2.540, *p* = 0.00166). The GEP score was also significantly higher in responders before adjustment (median 0.671 compared with −0.083, *p* = 0.000137). After adjustment, responders still had higher GEP scores (median 0.531 compared with −0.149, *p* = 0.0000208). Interestingly, although the difference between the GEP group medians became slightly smaller after adjustment, the Wilcoxon p-value decreased. This suggests that the overall rank distributions changed after adjustment. However, the p-value alone does not indicate the magnitude of the difference between the groups. Overall, both biomarkers remained significantly associated with treatment response after tumor-purity adjustment. This suggests that their associations with response cannot be explained entirely by differences in tumor purity.
+
+## Discussion and limitations
+
+Our results demonstrate that tumor purity is strongly associated with the expression of immune-related biomarkers measured using bulk RNA-sequencing.
+
+Both PDCD1 expression and the T-cell-inflamed GEP score showed strong negative correlations with estimated tumor purity. This is biologically plausible because samples with lower tumor purity generally contain a larger proportion of non-tumor cells, including infiltrating immune cells. Since PDCD1 and many genes included in the GEP are associated with immune activity, their measured expression can be influenced by the abundance of immune cells in the sample.
+
+However, tumor purity did not differ significantly between responders and non-responders. Furthermore, both PDCD1 expression and GEP scores remained significantly associated with treatment response after purity adjustment. This suggests that tumor-purity-related variation does not fully explain the observed associations.
+
+**Should tumor purity always be adjusted for?**
+
+Not necessarily. Tumor purity represents biological variation in the tumor microenvironment, rather than simply unwanted technical variation. Immune-cell infiltration can itself be important for the effectiveness of checkpoint inhibitor treatment. Therefore, adjusting for tumor purity may remove not only unwanted variation but also biologically meaningful information about the immune environment.
+
+Our analysis also has limitations. Tumor purity was estimated using ESTIMATE rather than measured directly, meaning that the estimates are dependent on gene-expression signatures. Furthermore, `removeBatchEffect()` removes the linear component associated with tumor purity and does not account for all possible relationships between cellular composition and gene expression. The adjustment should therefore be interpreted as a sensitivity analysis rather than proof that we have isolated the biological effect of each biomarker. Additionally, the analysis does not account for other potential confounding factors, such as differences in clinical characteristics or other components of the tumor microenvironment.
+
+Finally, this analysis is observational and cannot establish whether tumor purity or immune-related gene expression directly causes treatment response. Other biological and clinical factors may also influence the observed associations.
+
+Summary of the main findings:
+
+| Analysis                | Result        | Interpretation              |
+|-------------------------|---------------|-----------------------------|
+| Purity: NR vs R         | p = 0.173     | Not significant             |
+| Purity vs PDCD1         | rho = −0.691  | Strong negative correlation |
+| Purity vs GEP           | rho = −0.771  | Strong negative correlation |
+| PDCD1 before adjustment | p = 0.000396  | Significant                 |
+| PDCD1 after adjustment  | p = 0.00166   | Still significant           |
+| GEP before adjustment   | p = 0.000137  | Significant                 |
+| GEP after adjustment    | p = 0.0000208 | Still significant           |
+
+**Conclusion**
+
+Overall, our findings suggest that tumor purity is strongly associated with PDCD1 expression and T-cell-inflamed GEP scores measured using bulk RNA-sequencing. However, both biomarkers remained significantly associated with treatment response after purity adjustment. This demonstrates why tumor purity should be considered when interpreting immune-related biomarkers, while also highlighting that adjusting for it is not necessarily better, since meaningful information about immune-cell infiltration may be lost.
