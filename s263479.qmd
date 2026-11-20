@@ -610,7 +610,7 @@ resultsNames(dds_after_deseq4)
 
 ```{r}
 summary(res1)
-res_sig<-results(dds_after_deseq,alpha = 0.05)
+res_sig<-results(dds_after_deseq1,alpha = 0.05)
 summary(res_sig)
 
 ```
@@ -645,7 +645,7 @@ Converts your DESeq2 results into a data frame and adds a new column indicating 
 
 ```{r}
 res_list <- list(
-  "Total ≥10" = res,
+  "Total ≥10" = res1,
   "Total ≥100" = res2,
   "≥10 in 5 samples" = res3,
   "≥10 in 10 samples" = res4
@@ -653,11 +653,11 @@ res_list <- list(
 ```
 
 ```{r}
-sig <- rownames(res)[!is.na(res$padj) & res$padj < 0.05]
+sig1 <- rownames(res1)[!is.na(res1$padj) & res1$padj < 0.05]
 sig2 <- rownames(res2)[!is.na(res2$padj) & res2$padj < 0.05]
 sig3 <- rownames(res3)[!is.na(res3$padj) & res3$padj < 0.05]
 sig4 <- rownames(res4)[!is.na(res4$padj) & res4$padj < 0.05]
-length(Reduce(intersect, list(sig, sig2, sig3, sig4)))
+length(Reduce(intersect, list(sig1, sig2, sig3, sig4)))
 ```
 
 ```{r}
@@ -724,7 +724,7 @@ volcano
 In the volcano plot we can see the distribution of significant (green) and non-significant (red) genes.
 
 ```{r}
-res_df_2 <- as_tibble(res, rownames = "gene") |>
+res_df_2 <- as_tibble(res1, rownames = "gene") |>
   drop_na(padj, log2FoldChange) |>
   mutate(
     group = case_when(
@@ -793,7 +793,7 @@ top20[, c("gene", "log2FoldChange", "padj")]
 ```
 
 ```{r}
-norm_counts<-counts(dds_after_deseq,normalized=TRUE)
+norm_counts<-counts(dds_after_deseq1,normalized=TRUE)
 log_counts<-log2(norm_counts+1)
 
 heatmap_matrix <-log_counts[top20$gene, ]
@@ -804,7 +804,7 @@ The code prepares the expression data of our 20 most statistically significant d
 
 ```{r}
 annotation_col <- data.frame(
-  BOR = dds_after_deseq$BOR,
+  BOR = dds_after_deseq1$BOR,
   row.names = colnames(heatmap_matrix)
 )
 sample_order <- order(annotation_col$BOR)
@@ -844,8 +844,8 @@ library(fgsea)
 ## Rank genes
 
 ```{r}
-ranked_genes <- res$stat
-names(ranked_genes) <- rownames(res)
+ranked_genes <- res1$stat
+names(ranked_genes) <- rownames(res1)
 
 ranked_genes <- ranked_genes[!is.na(ranked_genes)]
 ranked_genes <- ranked_genes[names(ranked_genes) != ""]
@@ -1022,7 +1022,7 @@ mainPathways <- fgsea_res[
 ```
 
 ```{r}
-nrow(mainPathways)
+length(unique(mainPathways))
 ```
 
 Many of the original pathways share genes and capture similar biological processes. `collapsePathways()` identified pathways whose enrichment could be explained by other, more significant pathways.
@@ -1037,7 +1037,7 @@ Several limitations should be considered when interpreting the differential gene
 
 -   **Technical variability:** Differences in sample preparation, sequencing depth, RNA quality and batch effects may introduce unwanted variation into the data.
 
--   **Size of the groups:**
+-   **Size of the groups:** there is a big difference in the number of responders (25) and non-responders (167)
 
 # **Why differential expression does not imply causation**
 
