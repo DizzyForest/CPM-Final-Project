@@ -643,6 +643,8 @@ sig4 <- rownames(res4)[!is.na(res4$padj) & res4$padj < 0.05]
 length(Reduce(intersect, list(sig1, sig2, sig3, sig4)))
 ```
 
+This find the shared genes among all 4 settings (440 genes)
+
 ```{r}
 deg_counts <- data.frame(
   Filtering = names(res_list),
@@ -753,7 +755,9 @@ volcano_spec<-ggplot(res_df_2, aes(x = log2FoldChange, y = -log10(padj))) +
 volcano_spec
 ```
 
-The above plot shows an asymmetric distribution, with more significantly differentially expressed genes on the non-responder side and generally larger negative fold changes. This suggests that the two response groups exhibit distinct gene expression patterns at the individual gene level. However, further functional analysis, such as GSEA, is needed to understand the biological processes underlying these differences.
+The above plot shows an asymmetric distribution, with more significantly differentially expressed genes on the non-responder side and generally larger negative fold changes. This suggests that the two response groups exhibit distinct gene expression patterns at the individual gene level.
+
+Among the most statistically significant genes, ALB, FGB and HABP2 showed higher expression in Non-responders, whereas MYH15 and WDR87 showed higher expression in Responders. However, further functional analysis, such as GSEA, is needed to understand the biological processes underlying these differences.
 
 ### Heatmap
 
@@ -814,6 +818,8 @@ pheat
 ```
 
 The heatmap of the top 20 differentially expressed genes reveals distinct gene expression patterns between responders and non-responders. Several genes exhibit relatively higher expression in one response group compared with the other, consistent with the differential expression analysis. However, considerable inter-patient variability remains within both groups, indicating heterogeneity in their gene expression profiles.
+
+Red means that a gene is relatively more highly expressed in that sample compared with its average across all samples, while blue means relatively lower expression.
 
 # Biological processes - GSEA
 
@@ -1011,6 +1017,82 @@ length(unique(mainPathways))
 Many of the original pathways share genes and capture similar biological processes. `collapsePathways()` identified pathways whose enrichment could be explained by other, more significant pathways.
 
 The remaining 333 pathways provide a less redundant representation of your enrichment results.
+
+```{r}
+mainPathways <- fgsea_res |>
+  dplyr::filter(pathway %in% collapsedPathways$mainPathways) |>
+  dplyr::arrange(padj)
+```
+
+```{r}
+nrow(mainPathways)
+
+mainPathways |>
+  dplyr::select(pathway, NES, padj) |>
+  head(20)
+```
+
+After collapsing overlapping pathways, the main biological patterns remained consistent with our initial GSEA results.
+
+Responders were mainly associated with cell cycle, DNA repair, chromosome segregation, and DNA replication, while Non-responders were associated with biological adhesion, tissue development, tube development, and circulatory system development.
+
+```{r}
+mainPathways |>
+  summarise(
+    R = sum(NES > 0),
+    NR = sum(NES < 0)
+  )
+```
+
+```{r}
+top_R <- mainPathways |>
+  filter(NES > 0) |>
+  slice_min(padj, n = 5)
+
+top_NR <- mainPathways |>
+  filter(NES < 0) |>
+  slice_min(padj, n = 5)
+
+top_main <- bind_rows(top_R, top_NR)
+top_main
+```
+
+In Responders, enrichment was mainly associated with cell proliferation and DNA-related processes, while in Non-responders, it was associated with tissue organization, cell adhesion, and vascular development.
+
+```{r}
+top_main <- top_main |>
+  mutate(
+    Response = if_else(NES > 0, "R", "NR"),
+    pathway_label = gsub("_", " ", sub("^GOBP_", "", pathway))
+  )
+```
+
+```{r}
+collapsed<-ggplot(top_main,
+       aes(x = reorder(pathway_label, NES),
+           y = NES,
+           fill = Response)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c(
+    "R" = "firebrick",
+    "NR" = "steelblue"
+  )) +
+  labs(
+    title = "Top 10 Representative Biological Processes",
+    x = "Biological process",
+    y = "Normalized Enrichment Score (NES)",
+    fill = "Enriched towards"
+  ) +
+  theme_minimal()
+collapsed
+```
+
+This plot summarizes the five representative biological processes enriched in each group, following pathway redundancy reduction.
+
+The positive NES values indicate enrichment towards Responders, mainly involving DNA repair and cell cycle-related processes, while the negative NES values indicate enrichment towards Non-responders, mainly involving tissue development, biological adhesion, and vascular development.
+
+This highlights two distinct biological expression patterns associated with treatment response.
 
 # **Limitations of the analysis**
 
