@@ -1,0 +1,2005 @@
+---
+title: "CMP_complete"
+format:
+  html:
+    embed-resources: true
+    toc: true
+execute:
+  echo: true
+  warning: false
+  message: false
+editor: visual
+---
+
+# Load libraries and prepare data
+
+```{r}
+library(tidyverse)
+library(gridExtra)
+library(DESeq2)
+library(pheatmap)
+library(msigdbr)
+library(fgsea)
+library(GSVA)
+library(immunedeconv)
+library(limma)
+library(pROC)
+```
+
+## Load data
+
+```{r}
+imvigor     <- readRDS("IMvigor210_plain.rds")
+counts_df   <- as.data.frame(imvigor[["counts"]])
+tpm_df      <- as.data.frame(imvigor[["tpm"]])
+tpm_mat     <- as.matrix(imvigor[["tpm"]])
+clinical_df <- as.data.frame(imvigor[["clinical"]])
+
+# Shared 18-gene T-cell-inflamed GEP signature (Ayers et al., 2017)
+GEP_genes <- c(
+  "CCL5", "CD27", "CD274", "CD276", "CD8A", "CMKLR1",
+  "CXCL9", "CXCR6", "HLA-DQA1", "HLA-DRB1", "HLA-E",
+  "IDO1", "LAG3", "NKG7", "PDCD1LG2", "PSMB10",
+  "STAT1", "TIGIT"
+)
+
+stopifnot(
+  !is.null(rownames(tpm_mat)),
+  !is.null(colnames(tpm_mat)),
+  all(c("sample_id", "BOR") %in% names(clinical_df)),
+  !anyDuplicated(rownames(tpm_mat)),
+  !anyDuplicated(colnames(tpm_mat)),
+  !anyDuplicated(clinical_df$sample_id),
+  !anyNA(tpm_mat),
+  all(is.finite(tpm_mat)),
+  all(tpm_mat >= 0),
+  all(clinical_df$sample_id %in% colnames(tpm_mat)),
+  all(GEP_genes %in% rownames(tpm_mat))
+)
+```
+
+-   `counts_df`: containing the raw counts
+
+    -   rows: genes
+
+    -   columns: samples
+
+-   `tpm_df` / `tpm_mat`: containing the normalized counts
+
+    -   rows: genes
+
+    -   columns: samples
+
+-   `clinical_df`: metadata
+
+    -   rows: samples
+
+    -   columns: `pat_id`/`BOR`/`TMB`/`sample_id`
+
+```{r}
+counts_samples <- unique(colnames(counts_df))
+length(counts_samples)
+```
+
+There is no overlap.
+
+## Explore the data
+
+```{r}
+sum(is.na(counts_df))
+colSums(is.na(clinical_df))
+identical(colnames(counts_df), clinical_df$sample_id)
+table(clinical_df$BOR)
+summary(as.numeric(as.matrix(counts_df)))
+```
+
+-   number of missing values in the TMB column: 42
+
+-   the sample IDs in your expression dataframe and clinical dataframe are identical in both name and order
+
+-   number of responders: 25
+
+-   number of non-responders: 167
+
+## 1. Explore distribution for one sample
+
+### RAW data
+
+```{r}
+sample_id <- colnames(counts_df)[10]
+
+## Check that this sample is also present in the TPM data
+sample_id %in% colnames(tpm_df)
+
+df_counts <- data.frame(
+  expression = counts_df[, sample_id]
+)
+```
+
+We chose a random (10th) sample to visualize its distribution.
+
+-   `df_counts`: the expression values in one sample
+
+#### Make a histogram with raw data for one sample
+
+```{r}
+p1 <- ggplot(df_counts, aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Raw counts",
+    subtitle = sample_id,
+    x = "Raw count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p1
+```
+
+#### Log2-transformed raw counts for one sample
+
+We normalize raw RNA-seq counts because raw counts do not only reflect gene expression levels. They are also influenced by technical factors such as gene length and sequencing depth. TPM stands for Transcripts Per Million and accounts for both of these factors.
+
+```{r}
+p2 <- df_counts |>
+  ggplot(aes(x = log2(expression + 1))) +
+  geom_histogram(
+    bins = 50,
+    fill = "cyan",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Log2-transformed raw counts",
+    subtitle = sample_id,
+    x = "log2(raw count + 1)",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+
+p2
+```
+
+```{r}
+com_plot1 <- grid.arrange(p1, p2, ncol = 2)
+```
+
+### TPM-normalized data
+
+```{r}
+df_tpm <- data.frame(
+  expression = tpm_df[, sample_id]
+)
+```
+
+#### Repeat the 2 plots for TPM
+
+```{r}
+p3 <- ggplot(df_tpm, aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "TPM counts",
+    subtitle = sample_id,
+    x = "TPM count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p3
+```
+
+```{r}
+p4 <- df_tpm |>
+  ggplot(aes(x = log2(expression + 1))) +
+  geom_histogram(
+    bins = 50,
+    fill = "cyan",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Log-2 transformed TPM counts",
+    subtitle = sample_id,
+    x = "log2 (TPM counts + 1)",
+    y = "Number of genes"
+  ) +
+  theme_minimal()
+p4
+```
+
+### Compare all four distributions
+
+```{r}
+com_plot2 <- grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
+
+The full distribution of expressions with all zero values. As we have seen earlier a big part of the expression data contains genes with zero/ near zero expression. This is why the distribution is right-tailed.
+
+## 2. Explore raw count distribution for all the samples
+
+```{r}
+counts_long <- counts_df %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "sample_id",
+    values_to = "expression"
+  )
+```
+
+### Raw data
+
+```{r}
+p1_all <- ggplot(counts_long, aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Raw counts",
+    x = "Raw count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p1_all
+```
+
+#### Log2-transformed raw counts for all samples
+
+```{r}
+p2_all <- ggplot(counts_long, aes(x = log2(expression + 1))) +
+  geom_histogram(
+    bins = 50,
+    fill = "cyan",
+    colour = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Distribution of raw counts",
+    x = "Raw counts",
+    y = "Log2(expression+1)"
+  ) +
+  theme_minimal()
+p2_all
+```
+
+#### TPM-normalized data
+
+#### Repeat the 2 plots for TPM
+
+```{r}
+tpm_long <- tpm_df %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "sample_id",
+    values_to = "expression"
+  )
+```
+
+```{r}
+p3_all <- ggplot(tpm_long, aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "TPM counts",
+    x = "TPM count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p3_all
+```
+
+```{r}
+p4_all <- tpm_long |>
+  ggplot(aes(x = log2(expression + 1))) +
+  geom_histogram(
+    bins = 50,
+    fill = "cyan",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Log-2 transformed TPM counts",
+    x = "log2 (TPM counts + 1)",
+    y = "Number of genes"
+  ) +
+  theme_minimal()
+p4_all
+```
+
+### Compare all four distributions
+
+```{r}
+com_plot2_all <- grid.arrange(p1_all, p2_all, p3_all, p4_all, ncol = 2)
+```
+
+## 3. Non-zero distributions for a random sample
+
+### Raw data
+
+```{r}
+p1_non_zero <- df_counts %>%
+  dplyr::filter(expression > 0) %>%
+  ggplot(aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Non-zero raw counts",
+    subtitle = sample_id,
+    x = "Raw count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p1_non_zero
+```
+
+#### Log2-transformed raw counts for all samples
+
+```{r}
+p2_non_zero <- df_counts |>
+  dplyr::filter(expression > 0) %>%
+  ggplot(aes(x = log2(expression))) +
+  geom_histogram(
+    bins = 50,
+    fill = "cyan",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Log2-transformed non-zero raw counts",
+    subtitle = sample_id,
+    x = "log2(raw count)",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+
+p2_non_zero
+```
+
+#### TPM-normalized data
+
+#### Repeat the 2 plots for TPM
+
+```{r}
+p3_non_zero <- df_tpm %>%
+  dplyr::filter(expression > 0) %>%
+  ggplot(aes(x = expression)) +
+  geom_histogram(
+    bins = 50,
+    fill = "lightgreen",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "TPM non-zero counts",
+    subtitle = sample_id,
+    x = "TPM count",
+    y = "Number of genes"
+  ) +
+  theme_classic(base_size = 13)
+p3_non_zero
+```
+
+```{r}
+p4_non_zero <- df_tpm |>
+  dplyr::filter(expression > 0) %>%
+  ggplot(aes(x = log2(expression))) +
+  geom_histogram(
+    bins = 50,
+    fill = "cyan",
+    color = "black",
+    linewidth = 0.3
+  ) +
+  labs(
+    title = "Log-2 transformed TPM non-zero counts",
+    subtitle = sample_id,
+    x = "log2 (TPM counts)",
+    y = "Number of genes"
+  ) +
+  theme_minimal()
+p4_non_zero
+```
+
+### Compare all four non-zero distributions
+
+```{r}
+com_plot3 <- grid.arrange(p1_non_zero, p2_non_zero, p3_non_zero, p4_non_zero, ncol = 2)
+```
+
+# Principal component analysis (PCA)
+
+## Log2 transform
+
+```{r}
+## We center the log2-transformed FPKM data but do not scale genes to
+## unit variance. Log2 transformation already reduces large expression
+## differences, and scaling it again, would give all the genes
+## equal variance, giving low-variance or noisy genes too much influence on PCA.
+
+tpm_df_logt <- log2(tpm_df + 1)
+```
+
+## Remove genes with zero variance
+
+```{r}
+keep_count <- apply(tpm_df_logt, 1, sd) > 0 # sd ~ standard deviation
+tpm_counts_pca <- tpm_df_logt[keep_count, ]
+```
+
+-   `tpm_counts_pca`: log2 transformed data without the genes with zero values
+
+## **Principal Component Analysis on tpm_counts_pca**
+
+```{r}
+pca_count <- prcomp(
+  t(tpm_counts_pca),
+  center = TRUE,
+  scale. = TRUE
+)
+```
+
+### Check how much variance is explained
+
+-   **PC1:** The direction that captures the largest amount of variation in the dataset.
+
+-   **PC2:** The direction that captures the second-largest amount of variation, while being orthogonal (perpendicular) to PC1.
+
+```{r}
+summary(pca_count)$importance[, 1:7]
+```
+
+-   Standard deviation: How much the sample scores vary along each principal component. Square root of the variance.
+
+-   Proportion of Variance: The fraction of total variation explained by that individual component.
+
+-   Cumulative Proportion: The total variation explained by all components up to that point.
+
+## **Calculating the variance**
+
+```{r}
+var_TPM <- 100 * pca_count$sdev^2 / sum(pca_count$sdev^2)
+```
+
+## Plot PC1 and PC2 with metadata
+
+```{r}
+df_pca_tpm <- data.frame(
+  sample_id = row.names(pca_count$x),
+  PC1 = pca_count$x[, 1],
+  PC2 = pca_count$x[, 2]
+)
+```
+
+Creates a data frame containing the coordinates of each sample along PC1 and PC2, which you can then use to create a PCA plot.
+
+## Match sample ID
+
+```{r}
+sample_match <- match(
+  df_pca_tpm$sample_id,
+  clinical_df$sample_id
+)
+sum(is.na(sample_match))
+```
+
+Checks whether the sample IDs in your PCA data frame match the sample IDs in your clinical metadata.
+
+`clinical_df` contains biological and clinical information about each sample, such as disease status, age, sex or treatment group.
+
+By combining this information with your PCA results, you can investigate whether these factors are associated with differences in gene expression.
+
+## Add label for responding
+
+```{r}
+df_pca_tpm$BOR <- factor(clinical_df$BOR[sample_match])
+```
+
+Converts BOR into a categorical variable, then adds it to the `df_pca_tpm` as a new column.
+
+```{r}
+pca_plot1 <- ggplot(df_pca_tpm, aes(x = PC1, y = PC2, color = BOR)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey60") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey60") +
+  geom_point(size = 2) +
+  theme_classic(base_size = 13) +
+  labs(
+    title = "PCA based on log2(TPM + 1)",
+    x = paste0("PC1 (", round(var_TPM[1], 1), "%)"),
+    y = paste0("PC2 (", round(var_TPM[2], 1), "%)")
+  )
+pca_plot1
+```
+
+The responders (R) and non-responders (NR) largely overlap, without clear separation along PC1 or PC2.
+
+This suggests that treatment response is not clearly associated with the dominant patterns of gene expression variation captured by these two components. However, response-associated differences may still exist in other principal components or individual genes.
+
+# Differential Gene Expression Analysis (DESeq2)
+
+## Prepare sample metadata
+
+```{r}
+clinical_df$BOR <- factor(
+  clinical_df$BOR,
+  levels = c("NR", "R")
+)
+```
+
+This code converts the BOR column into a categorical variable (factor) and explicitly defines the order of its categories. By setting NR as the first level, it becomes the default reference group under standard treatment coding.
+
+```{r}
+rownames(clinical_df) <- clinical_df$sample_id
+
+identical(
+  colnames(counts_df),
+  rownames(clinical_df)
+)
+```
+
+Ensures that your gene expression count matrix and clinical metadata contain the same samples in exactly the same order.
+
+## Create DESeq2 object
+
+```{r}
+dds <- DESeqDataSetFromMatrix(
+  countData = as.matrix(counts_df),
+  colData = clinical_df,
+  design = ~BOR
+)
+```
+
+### Setting - 1: keep genes with a sum of at least 10 counts across all samples
+
+```{r}
+keep_dds1 <- rowSums(counts(dds)) >= 10
+dds_deseq_r1 <- dds[keep_dds1, ]
+```
+
+### Setting - 2: keep genes with a sum of at least 100 counts across all sample
+
+```{r}
+keep_dds2 <- rowSums(counts(dds)) >= 100
+dds_deseq_r2 <- dds[keep_dds2, ]
+```
+
+### Setting - 3: keep genes with at least 10 counts for at least 5 sample
+
+```{r}
+keep_dds3 <- rowSums(counts(dds) >= 10) >= 5
+dds_deseq_r3 <- dds[keep_dds3, ]
+```
+
+### Setting - 4: keep genes with at least 10 counts for at least 10 sample
+
+```{r}
+keep_dds4 <- rowSums(counts(dds) >= 10) >= 10
+dds_deseq_r4 <- dds[keep_dds4, ]
+```
+
+Performs pre-filtering of lowly expressed genes before differential gene expression analysis with DESeq2.
+
+## Run DESeq2 for all 4 settings
+
+```{r}
+dds_after_deseq1 <- DESeq(dds_deseq_r1)
+dds_after_deseq2 <- DESeq(dds_deseq_r2)
+dds_after_deseq3 <- DESeq(dds_deseq_r3)
+dds_after_deseq4 <- DESeq(dds_deseq_r4)
+```
+
+## Results DESeq
+
+```{r}
+res1 <- results(dds_after_deseq1)
+res2 <- results(dds_after_deseq2)
+res3 <- results(dds_after_deseq3)
+res4 <- results(dds_after_deseq4)
+```
+
+```{r}
+resultsNames(dds_after_deseq1)
+resultsNames(dds_after_deseq2)
+resultsNames(dds_after_deseq3)
+resultsNames(dds_after_deseq4)
+```
+
+## Interpret results
+
+### Main (first) setting
+
+```{r}
+summary(res1)
+res_sig <- results(dds_after_deseq1, alpha = 0.05)
+summary(res_sig)
+```
+
+### Other three settings
+
+```{r}
+summary(res2)
+res_sig2 <- results(dds_after_deseq2, alpha = 0.05)
+summary(res_sig2)
+
+summary(res3)
+res_sig3 <- results(dds_after_deseq3, alpha = 0.05)
+summary(res_sig3)
+
+summary(res4)
+res_sig4 <- results(dds_after_deseq4, alpha = 0.05)
+summary(res_sig4)
+```
+
+## Interpretation of values with the treshold: p-value\<0.05 for the main setting
+
+-   Upregulated genes: 167
+
+-   Downregulated genes: 278
+
+-   Low-count genes that have been filtered: 3571
+
+## Visualization
+
+Converts your DESeq2 results into a data frame and adds a new column indicating whether each gene is statistically significantly differentially expressed.
+
+```{r}
+res_list <- list(
+  "Total ≥10" = res1,
+  "Total ≥100" = res2,
+  "≥10 in 5 samples" = res3,
+  "≥10 in 10 samples" = res4
+)
+```
+
+```{r}
+sig1 <- rownames(res1)[!is.na(res1$padj) & res1$padj < 0.05]
+sig2 <- rownames(res2)[!is.na(res2$padj) & res2$padj < 0.05]
+sig3 <- rownames(res3)[!is.na(res3$padj) & res3$padj < 0.05]
+sig4 <- rownames(res4)[!is.na(res4$padj) & res4$padj < 0.05]
+length(Reduce(intersect, list(sig1, sig2, sig3, sig4)))
+```
+
+This find the shared genes among all 4 settings (440 genes).
+
+```{r}
+deg_counts <- data.frame(
+  Filtering = names(res_list),
+  R = sapply(res_list, function(x) {
+    sum(x$padj < 0.05 & x$log2FoldChange > 0, na.rm = TRUE)
+  }),
+  NR = sapply(res_list, function(x) {
+    sum(x$padj < 0.05 & x$log2FoldChange < 0, na.rm = TRUE)
+  })
+)
+```
+
+```{r}
+deg_long <- deg_counts |>
+  tidyr::pivot_longer(
+    cols = c(R, NR),
+    names_to = "Response",
+    values_to = "DEGs"
+  )
+```
+
+### Bar Plot
+
+```{r}
+barplot_all_settings <- ggplot(deg_long, aes(x = Filtering, y = DEGs, fill = Response)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Effect of Gene Prefiltering on Differential Expression",
+    x = "Prefiltering strategy",
+    y = "Number of significant DEGs",
+    fill = "Higher expression"
+  ) +
+  geom_text(
+    aes(label = DEGs),
+    position = position_dodge(width = 0.9),
+    vjust = -0.5,
+    size = 4
+  ) +
+  theme_minimal()
+barplot_all_settings
+```
+
+### Volcano Plot for main setting
+
+```{r}
+res_df <- as.data.frame(res1) |>
+  mutate(significant = padj < 0.05)
+```
+
+```{r}
+volcano <- res_df |>
+  ggplot(aes(
+    x = log2FoldChange,
+    y = -log10(padj),
+    color = significant
+  )) +
+  geom_point() +
+  scale_color_manual(values = c("red", "green")) +
+  labs(
+    x = "Log2 Fold Change",
+    y = "-Log10 Adjusted P-value",
+    title = "Volcano Plot"
+  ) +
+  theme_minimal()
+volcano
+```
+
+In the volcano plot we can see the distribution of significant (green) and non-significant (red) genes.
+
+```{r}
+res_df_2 <- as_tibble(res1, rownames = "gene") |>
+  drop_na(padj, log2FoldChange) |>
+  mutate(
+    group = case_when(
+      padj < 0.05 & log2FoldChange > 0 ~ "Up in Responders(R)",
+      padj < 0.05 & log2FoldChange < 0 ~ "Up in Non-responders (NR)",
+      TRUE ~ "Not significant"
+    )
+  )
+
+top_labels <- res_df_2 |>
+  dplyr::filter(group != "Not significant") |>
+  slice_min(padj, n = 10)
+
+volcano_spec <- ggplot(res_df_2, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(aes(color = group)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "grey40") +
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Up in Responders(R)" = "firebrick",
+      "Up in Non-responders (NR)" = "steelblue",
+      "Not significant" = "grey80"
+    )
+  ) +
+  geom_text(
+    data = top_labels,
+    aes(label = gene),
+    size = 3,
+    vjust = -0.6,
+    check_overlap = TRUE
+  ) +
+  annotate(
+    "text",
+    x = max(res_df_2$log2FoldChange),
+    y = 0.3,
+    label = "Higher in Responders(R) \u2192",
+    hjust = 1,
+    size = 3,
+    fontface = "italic",
+    color = "firebrick"
+  ) +
+  annotate(
+    "text",
+    x = min(res_df_2$log2FoldChange),
+    y = 0.3,
+    label = "\u2190 Higher in Non-responders (NR)",
+    hjust = 0,
+    size = 3,
+    fontface = "italic",
+    color = "steelblue"
+  ) +
+  labs(
+    x = "Log2 Fold Change",
+    y = "-Log10 Adjusted P-value",
+    title = "Volcano Plot"
+  ) +
+  theme_minimal()
+volcano_spec
+```
+
+The above plot shows an asymmetric distribution, with more significantly differentially expressed genes on the non-responder side and generally larger negative fold changes. This suggests that the two response groups exhibit distinct gene expression patterns at the individual gene level.
+
+Among the most statistically significant genes, ALB, FGB and HABP2 showed higher expression in Non-responders, whereas MYH15 and WDR87 showed higher expression in Responders. However, further functional analysis, such as GSEA, is needed to understand the biological processes underlying these differences.
+
+### Heatmap
+
+```{r}
+top20 <- res_df %>%
+  tibble::rownames_to_column("gene") %>%
+  arrange(padj) %>%
+  slice_head(n = 20)
+top20
+```
+
+The code extracts the 20 most statistically significant differentially expressed genes from your DESeq2 results, based on their adjusted p-values.
+
+```{r}
+top20[, c("gene", "log2FoldChange", "padj")]
+```
+
+```{r}
+norm_counts <- counts(dds_after_deseq1, normalized = TRUE)
+log_counts <- log2(norm_counts + 1)
+
+heatmap_matrix <- log_counts[top20$gene, ]
+dim(heatmap_matrix)
+```
+
+The code prepares the expression data of our 20 most statistically significant differentially expressed genes for heatmap visualization.
+
+```{r}
+annotation_col <- data.frame(
+  BOR = dds_after_deseq1$BOR,
+  row.names = colnames(heatmap_matrix)
+)
+deg_sample_order <- order(annotation_col$BOR)
+
+heatmap_matrix <- heatmap_matrix[, deg_sample_order]
+annotation_col <- annotation_col[deg_sample_order, , drop = FALSE]
+```
+
+This code prepares the clinical annotation for our heatmap and arranges the samples according to their treatment response (NR or R).
+
+```{r}
+pheat <- pheatmap(
+  heatmap_matrix,
+  scale = "row",
+  annotation_col = annotation_col,
+  show_colnames = FALSE,
+  breaks = seq(-2.5, 2.5, length.out = 101),
+  cluster_cols = FALSE,
+  gaps_col = sum(annotation_col$BOR == "NR"),
+  main = "Heatmap of Top 20 Differentially Expressed Genes"
+)
+pheat
+```
+
+The heatmap of the top 20 differentially expressed genes reveals distinct gene expression patterns between responders and non-responders. Several genes exhibit relatively higher expression in one response group compared with the other, consistent with the differential expression analysis. However, considerable inter-patient variability remains within both groups, indicating heterogeneity in their gene expression profiles.
+
+Red means that a gene is relatively more highly expressed in that sample compared with its average across all samples, while blue means relatively lower expression.
+
+# Biological processes - GSEA
+
+## Rank genes
+
+```{r}
+ranked_genes <- res1$stat
+names(ranked_genes) <- rownames(res1)
+
+ranked_genes <- ranked_genes[!is.na(ranked_genes)]
+ranked_genes <- ranked_genes[names(ranked_genes) != ""]
+```
+
+Prepares a named vector of gene statistics for Gene Set Enrichment Analysis (GSEA), using your DESeq2 results.
+
+## Run fgsea against MSigDB gene sets
+
+```{r}
+gene_sets <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "BP")
+gene_sets <- split(x = gene_sets$gene_symbol, f = gene_sets$gs_name) # converts to a format needed by fgsea
+
+set.seed(42) # reproducible permutations
+fgsea_res <- fgsea(
+  pathways = gene_sets,
+  stats = ranked_genes, # stats: gene names for GSEA
+  nPermSimple = 10000
+) # raise from the default 1000 to resolve more pathway p-values
+```
+
+## **Visualize the enriched pathways**
+
+```{r}
+topPathways_top5 <- fgsea_res |>
+  dplyr::arrange(padj) |>
+  dplyr::slice(1:5)
+
+pathways <- ggplot(
+  topPathways_top5,
+  mapping = aes(x = reorder(pathway, NES), y = NES)
+) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    x = "Pathway",
+    y = "Normalized Enrichment Score (NES)",
+    title = "Top 5 Enriched Pathways"
+  ) +
+  theme_minimal()
+pathways
+```
+
+The GSEA results show that the top five enriched pathways are mainly associated with DNA repair, chromosome organization and cell cycle regulation. All five pathways have positive normalized enrichment scores (NES \> 2), indicating enrichment in responders compared with non-responders.
+
+## **GSEA table**
+
+```{r}
+number_of_top_pathways_up <- 10
+number_of_top_pathways_down <- 10
+
+topPathwaysUp <- fgsea_res[ES > 0][head(order(pval), n = number_of_top_pathways_up), pathway]
+topPathwaysDown <- fgsea_res[ES < 0][head(order(pval), n = number_of_top_pathways_down), pathway]
+topPathways_table <- c(topPathwaysUp, rev(topPathwaysDown))
+```
+
+Selects the 10 most statistically significant positively enriched pathways and the 10 most statistically significant negatively enriched pathways from your GSEA results.
+
+```{r}
+gsea_table <- plotGseaTable(
+  gene_sets[topPathways_table],
+  stats = ranked_genes,
+  fgseaRes = fgsea_res,
+  gseaParam = 0.5
+)
+gsea_table
+```
+
+GSEA revealed distinct biological processes associated with the two response groups. Responders showed significant enrichment of pathways related to DNA repair, chromosome organization and cell cycle regulation, whereas non-responders exhibited enrichment of pathways associated with cell migration, adhesion and vascular development. These findings suggest that differences in cell proliferation and cellular motility may be associated with treatment response, although further investigation is required to establish their biological significance.
+
+```{r}
+enr1 <- plotEnrichment(
+  gene_sets[[head(fgsea_res[order(padj), ], 1)$pathway]],
+  ranked_genes
+) +
+  labs(title = head(fgsea_res[order(padj), ], 1)$pathway) +
+  coord_cartesian(ylim = c(-0.6, 0.4))
+enr1
+```
+
+The GSEA enrichment plot demonstrates significant positive enrichment of the cell cycle process pathway in responders. Cell cycle-related genes are predominantly concentrated towards the top of the ranked gene list, suggesting that cell cycle regulation and proliferation may be associated with treatment response.
+
+```{r}
+enr2 <- plotEnrichment(
+  gene_sets[[head(fgsea_res[order(abs(NES)), ], 1)$pathway]],
+  ranked_genes
+) +
+  labs(title = head(fgsea_res[order(abs(NES)), ], 1)$pathway) +
+  coord_cartesian(ylim = c(-0.6, 0.4)) # to keep it in the same axis as the most enriched for comparison
+enr2
+```
+
+The above code selects and visualizes the least enriched pathway among pathways. Searches among all pathways, regardless of their size.
+
+The GSEA enrichment plot for the regulation of cardiac muscle cell action potential pathway shows relatively weak enrichment, with pathway-associated genes distributed throughout the ranked gene list. The running enrichment score fluctuates around zero without a pronounced positive or negative peak, suggesting no clear preferential enrichment in either response group. Statistical significance should be confirmed using the corresponding adjusted p-value.
+
+```{r}
+enr3 <- plotEnrichment(
+  gene_sets[[head(fgsea_res[size >= 50][order(abs(NES)), ], 1)$pathway]],
+  ranked_genes
+) +
+  labs(title = head(fgsea_res[size >= 50][order(abs(NES)), ], 1)$pathway) +
+  coord_cartesian(ylim = c(-0.6, 0.4)) # to keep it in the same axis as the most enriched for comparison
+enr3
+```
+
+The above code selects and visualizes the least enriched pathway among pathways containing at least 50 genes. Small pathways can show weak enrichment simply because they contain very few genes distributed throughout the ranked list.
+
+The ER–nucleus signaling pathway exhibited weak negative enrichment, with genes distributed throughout the ranked gene list. In contrast to the cell cycle process pathway, no pronounced enrichment pattern was observed, suggesting limited association with treatment response. However, the adjusted p-value should be examined to determine statistical significance.
+
+```{r}
+enr4 <- plotEnrichment(
+  gene_sets[[head(fgsea_res[ES < 0][order(padj), ], 1)$pathway]],
+  ranked_genes
+) +
+  labs(title = head(fgsea_res[ES < 0][order(padj), ], 1)$pathway)
+enr4
+```
+
+The code selects and visualizes the most statistically significant negatively enriched pathway, meaning a pathway enriched in non-responders (NR).
+
+```{r}
+reactome_sets <- msigdbr(species = "Homo sapiens", category = "C2", subcategory = "CP:REACTOME")
+reactome_sets <- split(x = reactome_sets$gene_symbol, f = reactome_sets$gs_name)
+
+enr5 <- plotEnrichment(
+  reactome_sets[["REACTOME_FORMATION_OF_FIBRIN_CLOT_CLOTTING_CASCADE"]],
+  ranked_genes
+) +
+  labs(title = "Reactome pathway: Formation of fibrin clot / clotting cascade")
+enr5
+```
+
+This code retrieves human Reactome pathways and generates a GSEA enrichment plot for a manually selected pathway related to blood clot formation.
+
+The Reactome pathway associated with fibrin clot formation and the clotting cascade exhibited strong negative enrichment, with pathway-associated genes predominantly concentrated towards the lower end of the ranked gene list. This suggests that coagulation-related processes may be associated with non-response to treatment, consistent with the differential expression analysis.
+
+## Relevance to immunotherapy response
+
+The biological functions of the differentially expressed genes provide potential insights into immunotherapy response. Several genes with higher expression in non-responders, including FGB and HABP2, are involved in blood coagulation and fibrinolysis. This is consistent with the negative enrichment of the Reactome fibrin clot formation pathway, suggesting a potential association between coagulation-related processes and treatment resistance. Additionally, the enrichment of cell adhesion, migration and vascular development pathways in non-responders may reflect alterations in the tumour microenvironment that could limit immune cell infiltration and antitumour activity.
+
+# Collapse redundant pathways
+
+```{r}
+#| warning: false
+
+sigPathways <- fgsea_res[pval < 0.05][order(pval)]
+```
+
+```{r}
+nrow(sigPathways)
+```
+
+```{r}
+set.seed(42)
+
+system.time({
+  collapsedPathways <- suppressWarnings(
+    collapsePathways(
+      sigPathways,
+      gene_sets,
+      ranked_genes,
+      nperm = 100
+    )
+  )
+})
+```
+
+The function tests whether a pathway remains enriched after accounting for genes shared with another pathway. This helps determine whether two pathways provide redundant biological information.
+
+```{r}
+mainPathways_vec <- fgsea_res[
+  pathway %in% collapsedPathways$mainPathways
+][order(-NES), pathway]
+```
+
+```{r}
+length(unique(mainPathways_vec))
+```
+
+Many of the original pathways share genes and capture similar biological processes. `collapsePathways()` identified pathways whose enrichment could be explained by other, more significant pathways.
+
+The remaining 333 pathways provide a less redundant representation of your enrichment results.
+
+```{r}
+mainPathways <- fgsea_res |>
+  dplyr::filter(pathway %in% collapsedPathways$mainPathways) |>
+  dplyr::arrange(padj)
+```
+
+```{r}
+nrow(mainPathways)
+
+mainPathways |>
+  dplyr::select(pathway, NES, padj) |>
+  head(20)
+```
+
+After collapsing overlapping pathways, the main biological patterns remained consistent with our initial GSEA results.
+
+Responders were mainly associated with cell cycle, DNA repair, chromosome segregation, and DNA replication, while Non-responders were associated with biological adhesion, tissue development, tube development, and circulatory system development.
+
+```{r}
+mainPathways |>
+  summarise(
+    R = sum(NES > 0),
+    NR = sum(NES < 0)
+  )
+```
+
+```{r}
+top_R <- mainPathways |>
+  dplyr::filter(NES > 0) |>
+  slice_min(padj, n = 5)
+
+top_NR <- mainPathways |>
+  dplyr::filter(NES < 0) |>
+  slice_min(padj, n = 5)
+
+top_main <- bind_rows(top_R, top_NR)
+top_main
+```
+
+In Responders, enrichment was mainly associated with cell proliferation and DNA-related processes, while in Non-responders, it was associated with tissue organization, cell adhesion, and vascular development.
+
+```{r}
+top_main <- top_main |>
+  mutate(
+    Response = if_else(NES > 0, "R", "NR"),
+    pathway_label = gsub("_", " ", sub("^GOBP_", "", pathway))
+  )
+```
+
+```{r}
+collapsed <- ggplot(
+  top_main,
+  aes(
+    x = reorder(pathway_label, NES),
+    y = NES,
+    fill = Response
+  )
+) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c(
+    "R" = "firebrick",
+    "NR" = "steelblue"
+  )) +
+  labs(
+    title = "Top 10 Representative Biological Processes",
+    x = "Biological process",
+    y = "Normalized Enrichment Score (NES)",
+    fill = "Enriched towards"
+  ) +
+  theme_minimal()
+collapsed
+```
+
+This plot summarizes the five representative biological processes enriched in each group, following pathway redundancy reduction.
+
+The positive NES values indicate enrichment towards Responders, mainly involving DNA repair and cell cycle-related processes, while the negative NES values indicate enrichment towards Non-responders, mainly involving tissue development, biological adhesion, and vascular development.
+
+This highlights two distinct biological expression patterns associated with treatment response.
+
+# T-Cell-Inflamed Gene Expression Signature (GEP & ssGSEA)
+
+For this section, we wanted to see whether patients who responded to anti-PD-L1 treatment had higher expression of the T-cell-inflamed gene signature than patients who did not respond. We used the 18-gene signature described by Ayers et al. (2017). We calculated an exploratory 18-gene signature score by averaging the gene-wise standardized expression values across the 18 genes. This approach gives equal weight to each gene and is not an exact reproduction of the weighted GEP scoring method described by Ayers et al. (2017). Then we compared the scores between responders (R) and non-responders (NR). We also used ssGSEA as a second way of scoring the same gene set.
+
+## Prepare the data for RQ2
+
+We used TPM values because we are comparing gene expression between samples. We also need the clinical table to identify responders and non-responders.
+
+```{r}
+# Reorder TPM columns to match clinical sample order, align common samples, and filter to R / NR
+tpm_rq2 <- tpm_mat[, clinical_df$sample_id, drop = FALSE]
+common_samples_rq2 <- intersect(clinical_df$sample_id, colnames(tpm_rq2))
+clinical_rq2 <- clinical_df[match(common_samples_rq2, clinical_df$sample_id), , drop = FALSE]
+tpm_rq2 <- tpm_rq2[, common_samples_rq2, drop = FALSE]
+
+keep_rq2 <- !is.na(clinical_rq2$BOR) & clinical_rq2$BOR %in% c("NR", "R")
+clinical_rq2 <- clinical_rq2[keep_rq2, , drop = FALSE]
+tpm_rq2 <- tpm_rq2[, keep_rq2, drop = FALSE]
+clinical_rq2$Response <- factor(clinical_rq2$BOR, levels = c("NR", "R"))
+stopifnot(identical(colnames(tpm_rq2), clinical_rq2$sample_id))
+
+output_dir_rq2 <- "RQ2_results"
+dir.create(output_dir_rq2, showWarnings = FALSE)
+
+sample_counts <- as.data.frame(table(clinical_rq2$Response))
+names(sample_counts) <- c("Response", "Samples")
+
+print("Number of samples by treatment response.")
+print(sample_counts)
+```
+
+## Calculate the GEP score
+
+First, we applied `log2(TPM + 1)` to reduce the influence of very large expression values. Next, we converted the expression values of each gene into z-scores across all samples. This standardized the expression values so that genes with naturally higher expression levels would not disproportionately influence the overall GEP score.
+
+Finally, we took the average of the 18 z-scores for each sample. A higher score means that these genes tend to be expressed above their average level in our dataset.
+
+```{r}
+missing_genes <- setdiff(GEP_genes, rownames(tpm_rq2))
+if (length(missing_genes) > 0) {
+  stop("Missing signature genes: ", paste(missing_genes, collapse = ", "))
+}
+
+GEP_tpm <- tpm_rq2[GEP_genes, , drop = FALSE]
+GEP_log2 <- log2(GEP_tpm + 1)
+
+gene_sd <- apply(GEP_log2, 1, sd)
+if (any(!is.finite(gene_sd) | gene_sd == 0)) {
+  stop("A signature gene has zero or undefined variation.")
+}
+
+GEP_scaled <- t(scale(t(GEP_log2)))
+GEP_scores <- colMeans(GEP_scaled)
+
+RQ2_results <- data.frame(
+  sample_id = clinical_rq2$sample_id,
+  BOR = clinical_rq2$BOR,
+  Response = clinical_rq2$Response,
+  GEP_score = unname(GEP_scores[clinical_rq2$sample_id])
+)
+```
+
+## Compare GEP scores between responders and non-responders
+
+We used a Wilcoxon rank-sum test to compare the two groups. We also plotted the scores to see how much the groups overlap.
+
+```{r}
+GEP_test <- wilcox.test(
+  GEP_score ~ Response,
+  data = RQ2_results
+)
+
+GEP_medians <- aggregate(GEP_score ~ Response, RQ2_results, median)
+
+print("Median standardized GEP score by response group.")
+print(GEP_medians)
+
+cat("Wilcoxon p-value:", signif(GEP_test$p.value, 4), "\n")
+```
+
+```{r}
+#| fig-width: 7.5
+#| fig-height: 4.8
+#| fig-cap: "GEP scores by best overall response. Each point represents one sample; boxes show the median and interquartile range."
+
+p_gep <- ggplot(
+  RQ2_results,
+  aes(x = Response, y = GEP_score, fill = Response)
+) +
+  geom_boxplot(width = 0.55, alpha = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.13, alpha = 0.55, size = 1.6) +
+  scale_fill_manual(values = c(NR = "#F4A09C", R = "#58C8CD")) +
+  labs(
+    title = "T-cell-inflamed GEP and treatment response",
+    subtitle = paste0("Wilcoxon p = ", signif(GEP_test$p.value, 3)),
+    x = "Best overall response",
+    y = "Mean gene-wise z-score of log2(TPM + 1)"
+  ) +
+  theme_classic(base_size = 12) +
+  guides(fill = "none")
+print(p_gep)
+
+ggsave(
+  file.path(output_dir_rq2, "GEP_by_response.png"),
+  p_gep,
+  width = 7.5,
+  height = 4.8,
+  dpi = 300
+)
+```
+
+Responders had a higher median GEP score than non-responders (0.671 compared with -0.083). The difference was statistically significant (Wilcoxon test, *p* = 0.000137). However, there is still overlap between the groups. Some non-responders have high scores, so GEP alone cannot tell us for certain whether an individual patient will respond.
+
+Our results are be consistent with Ayers et al. (2017), who found that this signature was associated with response to pembrolizumab. It also supports Mariathasan et al.'s broader finding that T-cell-related gene expression is associated with response to atezolizumab.
+
+## Look at the expression of the individual genes
+
+We made a heatmap to see how the 18 genes contribute to the overall GEP pattern. Red indicates expression above the gene's average in this dataset, while blue indicates expression below the average. We grouped the samples by response and sorted them by GEP score within each group. Because we sorted by score, the colour gradient is partly expected and should not be treated as a separate statistical result.
+
+```{r}
+#| fig-width: 11
+#| fig-height: 5.5
+#| fig-cap: "Gene-wise standardized expression of the 18-gene signature. Samples are ordered by GEP score within response groups."
+
+rq2_sample_order <- order(RQ2_results$Response, RQ2_results$GEP_score)
+ordered_samples <- colnames(GEP_scaled)[rq2_sample_order]
+
+heatmap_data <- data.frame(
+  sample_id = rep(ordered_samples, each = length(GEP_genes)),
+  gene = rep(GEP_genes, times = length(ordered_samples)),
+  z_score = as.vector(GEP_scaled[, rq2_sample_order, drop = FALSE]),
+  Response = rep(
+    as.character(RQ2_results$Response[rq2_sample_order]),
+    each = length(GEP_genes)
+  )
+)
+heatmap_data$sample_id <- factor(
+  heatmap_data$sample_id,
+  levels = ordered_samples
+)
+heatmap_data$gene <- factor(
+  heatmap_data$gene,
+  levels = rev(GEP_genes)
+)
+
+p_heatmap <- ggplot(
+  heatmap_data,
+  aes(x = sample_id, y = gene, fill = z_score)
+) +
+  geom_tile() +
+  facet_grid(. ~ Response, scales = "free_x", space = "free_x") +
+  scale_fill_gradient2(
+    low = "navy",
+    mid = "white",
+    high = "firebrick",
+    midpoint = 0,
+    name = "Gene z-score"
+  ) +
+  labs(
+    title = "T-cell-inflamed GEP expression heatmap",
+    x = "Samples ordered by GEP score",
+    y = "Gene"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    panel.grid = element_blank()
+  )
+print(p_heatmap)
+
+ggsave(
+  file.path(output_dir_rq2, "GEP_heatmap.png"),
+  p_heatmap,
+  width = 11,
+  height = 5.5,
+  dpi = 300
+)
+```
+
+## Calculate ssGSEA scores
+
+We also tried ssGSEA. Instead of averaging standardized expression values, ssGSEA ranks genes within each sample and measures how strongly the 18 signature genes are represented among the more highly expressed genes. For this step we used the full TPM matrix, not only the 18 genes, because ssGSEA needs the other genes for ranking.
+
+After calculating one ssGSEA score per sample, we again compared responders and non-responders with a Wilcoxon test. The ssGSEA scores are on a different scale from our mean z-score GEP, so their numerical values should not be compared directly.
+
+```{r}
+ssgsea_parameters <- ssgseaParam(
+  exprData = tpm_rq2,
+  geneSets = list(Tcell_inflamed = GEP_genes)
+)
+
+ssgsea_matrix <- gsva(ssgsea_parameters, verbose = FALSE)
+ssgsea_scores <- as.numeric(ssgsea_matrix["Tcell_inflamed", ])
+names(ssgsea_scores) <- colnames(ssgsea_matrix)
+
+RQ2_results$ssGSEA_score <- unname(ssgsea_scores[RQ2_results$sample_id])
+
+ssGSEA_test <- wilcox.test(
+  ssGSEA_score ~ Response,
+  data = RQ2_results
+)
+
+ssGSEA_medians <- aggregate(ssGSEA_score ~ Response, RQ2_results, median)
+
+print("Median ssGSEA score by response group.")
+print(ssGSEA_medians)
+
+cat("Wilcoxon p-value:", signif(ssGSEA_test$p.value, 4), "\n")
+```
+
+```{r}
+#| fig-width: 7.5
+#| fig-height: 4.8
+#| fig-cap: "T-cell-inflamed ssGSEA scores by best overall response. Each point represents one sample."
+
+p_ssgsea <- ggplot(
+  RQ2_results,
+  aes(x = Response, y = ssGSEA_score, fill = Response)
+) +
+  geom_boxplot(width = 0.55, alpha = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.13, alpha = 0.55, size = 1.6) +
+  scale_fill_manual(values = c(NR = "#F4A09C", R = "#58C8CD")) +
+  labs(
+    title = "T-cell-inflamed ssGSEA and treatment response",
+    subtitle = paste0("Wilcoxon p = ", signif(ssGSEA_test$p.value, 3)),
+    x = "Best overall response",
+    y = "ssGSEA score"
+  ) +
+  theme_classic(base_size = 12) +
+  guides(fill = "none")
+print(p_ssgsea)
+
+ggsave(
+  file.path(output_dir_rq2, "ssGSEA_by_response.png"),
+  p_ssgsea,
+  width = 7.5,
+  height = 4.8,
+  dpi = 300
+)
+```
+
+The ssGSEA scores were also higher in responders (median 0.930) than in non-responders (median 0.738), with *p* = 0.000163. This agrees with the result from our mean z-score method. However, both analyses use the same samples and genes, so ssGSEA is a useful comparison of methods rather than an independent validation.
+
+## Interpret the results
+
+| Scoring method        | NR median | R median | Wilcoxon p-value |
+|-----------------------|----------:|---------:|-----------------:|
+| Mean standardized GEP |    −0.083 |    0.671 |         0.000137 |
+| ssGSEA                |     0.738 |    0.930 |         0.000163 |
+
+Both methods gave the same overall result: responders tended to have higher T-cell-inflamed signature scores. One possible explanation is that tumors with more existing immune activity are more likely to respond to PD-L1 blockade.
+
+However, the groups are not completely separated. A high score does not guarantee response, because other factors can affect whether immune cells can attack the tumor. For example, T-cell exclusion and stromal signalling may limit treatment response (Mariathasan et al., 2018). Another limitation is that bulk RNA-seq includes expression from tumor cells as well as immune and stromal cells. Therefore, a high immune signature score may partly reflect the number of immune cells in the sample.
+
+Overall, we found an association between the signature and treatment response in this cohort. We cannot conclude from this analysis alone that the signature causes response or can accurately predict response for individual patients.
+
+**Question: Why a high T- cell–inflamed GEP score does not necessarily guarantee treatment response?**
+
+A high T cell–inflamed GEP score does not guarantee treatment response because the score measures immune activity in the tumor, but it does not tell us whether the immune system can successfully kill the cancer cells.
+
+The GEP score can then be used in the next section when comparing GEP with PDCD1 expression and TMB.
+
+```{r}
+write.csv(
+  RQ2_results,
+  file.path(output_dir_rq2, "RQ2_GEP_and_ssGSEA_scores_for_RQ3.csv"),
+  row.names = FALSE
+)
+saveRDS(
+  RQ2_results,
+  file.path(output_dir_rq2, "RQ2_GEP_and_ssGSEA_scores_for_RQ3.rds")
+)
+
+summary_table <- data.frame(
+  method = c("Mean standardized GEP", "ssGSEA"),
+  median_NR = c(
+    GEP_medians$GEP_score[GEP_medians$Response == "NR"],
+    ssGSEA_medians$ssGSEA_score[ssGSEA_medians$Response == "NR"]
+  ),
+  median_R = c(
+    GEP_medians$GEP_score[GEP_medians$Response == "R"],
+    ssGSEA_medians$ssGSEA_score[ssGSEA_medians$Response == "R"]
+  ),
+  wilcoxon_p_value = c(GEP_test$p.value, ssGSEA_test$p.value)
+)
+write.csv(
+  summary_table,
+  file.path(output_dir_rq2, "RQ2_statistical_summary.csv"),
+  row.names = FALSE
+)
+```
+
+# Comparing PDCD1, GEP, and TMB
+
+In this section we will investigate how PD-1 (PDCD1) expression, the T-cell-inflamed GEP score and tumor mutational burden (TMB) compare in their association with response to anti-PD-L1 treatment.
+
+Biological framing: PDCD1 and the GEP score are both RNA read-outs of pre-existing T-cell immunity in the tumor (one gene vs. an 18-gene average). TMB is a DNA read-out of tumor antigenicity. We therefore ask (1) whether each biomarker differs between responders and non-responders, (2) in which direction and how strongly, and (3) whether the biomarkers carry the same or different information.
+
+We followed the approach of the course exercises (Day 6): Wilcoxon rank-sum tests for differences between response groups, Spearman correlation for associations between continuous variables, and adjustment for multiple testing with the false discovery rate (FDR).
+
+## Align RQ2 scores, PDCD1, and TMB
+
+```{r}
+stopifnot(
+  "PDCD1" %in% rownames(tpm_mat),
+  "TMB" %in% names(clinical_df),
+  !anyDuplicated(RQ2_results$sample_id),
+  all(RQ2_results$sample_id %in% colnames(tpm_mat)),
+  all(RQ2_results$sample_id %in% clinical_df$sample_id),
+  all(RQ2_results$BOR %in% c("NR", "R"))
+)
+
+tmb_raw <- as.numeric(
+  clinical_df$TMB[match(RQ2_results$sample_id, clinical_df$sample_id)]
+)
+
+df <- data.frame(
+  sample_id = RQ2_results$sample_id,
+  Response = factor(RQ2_results$BOR, levels = c("NR", "R")),
+  PDCD1 = log2(as.numeric(tpm_mat["PDCD1", RQ2_results$sample_id]) + 1),
+  GEP = RQ2_results$GEP_score,
+  TMB = log2(tmb_raw + 1) # NA stays NA: missing is not zero
+)
+
+stopifnot(identical(df$sample_id, RQ2_results$sample_id))
+
+biomarkers <- c(
+  PDCD1 = "PDCD1, log2(TPM + 1)",
+  GEP = "T-cell-inflamed GEP score",
+  TMB = "TMB, log2(mut/Mb + 1)"
+)
+
+print(table(df$Response))
+print(table(Response = df$Response, TMB_available = !is.na(df$TMB)))
+```
+
+## Distributions in responders and non-responders
+
+```{r}
+#| fig-width: 10
+#| fig-height: 4.5
+#| fig-cap: "Each biomarker by best overall response. Each point is one patient; boxes show the median and interquartile range. Group sizes differ for TMB because of missing values."
+
+long <- do.call(rbind, lapply(names(biomarkers), function(m) {
+  ok <- !is.na(df[[m]])
+  data.frame(
+    Response = df$Response[ok],
+    value = df[[m]][ok],
+    panel = sprintf(
+      "%s\nNR n = %d, R n = %d",
+      biomarkers[[m]],
+      sum(df$Response[ok] == "NR"),
+      sum(df$Response[ok] == "R")
+    )
+  )
+}))
+long$panel <- factor(long$panel, levels = unique(long$panel))
+
+p_box <- ggplot(long, aes(x = Response, y = value, fill = Response)) +
+  geom_boxplot(width = 0.55, alpha = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.13, alpha = 0.55, size = 1.6) +
+  facet_wrap(~panel, scales = "free_y") +
+  scale_fill_manual(values = c(NR = "#F4A09C", R = "#58C8CD")) +
+  labs(x = "Best overall response", y = NULL) +
+  theme_classic(base_size = 12) +
+  guides(fill = "none")
+print(p_box)
+
+dir.create("RQ3_results", showWarnings = FALSE)
+ggsave(
+  "RQ3_results/biomarkers_by_response.png",
+  p_box,
+  width = 10,
+  height = 4.5,
+  dpi = 300
+)
+```
+
+## Wilcoxon test and size of the difference
+
+For each biomarker we reported:
+
+-   the Wilcoxon rank-sum p-value, adjusted for three tests with the FDR (Benjamini-Hochberg) method;
+-   the size and direction of the difference, as the AUC with a 95% confidence interval.
+
+```{r}
+compare_groups <- function(data, set) {
+  do.call(rbind, lapply(names(biomarkers), function(m) {
+    ok <- !is.na(data[[m]])
+    x <- data[[m]][ok]
+    g <- data$Response[ok]
+    n_NR <- sum(g == "NR")
+    n_R <- sum(g == "R")
+
+    w <- wilcox.test(x ~ g, exact = FALSE)
+
+    # W counts the pairs in which the non-responder (first level) is higher,
+    # so the share of pairs in which the responder is higher is 1 - W / (n_NR * n_R).
+    auc <- 1 - unname(w$statistic) / (n_NR * n_R)
+
+    # 95% confidence interval for the AUC (DeLong method).
+    r <- roc(g, x, levels = c("NR", "R"), direction = "<", quiet = TRUE)
+    ci <- as.numeric(ci.auc(r))
+    stopifnot(abs(auc - ci[2]) < 1e-8) # same value from both routes
+
+    data.frame(
+      set = set,
+      biomarker = m,
+      n_NR = n_NR,
+      n_R = n_R,
+      median_NR = median(x[g == "NR"]),
+      median_R = median(x[g == "R"]),
+      AUC = auc,
+      AUC_low = ci[1],
+      AUC_high = ci[3],
+      p_value = w$p.value
+    )
+  }))
+}
+
+# Main analysis: every patient with a value for that biomarker.
+res_all <- compare_groups(df, "All available patients")
+res_all$p_FDR <- p.adjust(res_all$p_value, method = "BH")
+
+# Same patients for all three biomarkers, because TMB is missing for some.
+df_cc <- df[complete.cases(df[, names(biomarkers)]), ]
+res_cc <- compare_groups(df_cc, "Patients with all three biomarkers")
+res_cc$p_FDR <- p.adjust(res_cc$p_value, method = "BH")
+
+res <- rbind(res_all, res_cc)
+print(res, digits = 3, row.names = FALSE)
+write.csv(res, "RQ3_results/RQ3_statistical_summary.csv", row.names = FALSE)
+```
+
+```{r}
+#| fig-width: 7.5
+#| fig-height: 3.8
+#| fig-cap: "Size of the difference between response groups. Points are AUCs, bars are 95% confidence intervals; the dashed line marks no difference."
+
+res$biomarker <- factor(res$biomarker, levels = rev(names(biomarkers)))
+
+p_auc <- ggplot(res, aes(x = AUC, y = biomarker, colour = set)) +
+  geom_vline(xintercept = 0.5, linetype = "dashed", colour = "grey50") +
+  geom_pointrange(
+    aes(xmin = AUC_low, xmax = AUC_high),
+    position = position_dodge(width = 0.5)
+  ) +
+  scale_colour_manual(values = c("black", "grey55"), name = NULL) +
+  coord_cartesian(xlim = c(0.3, 1)) +
+  labs(
+    x = "AUC (probability that a responder has the higher value)",
+    y = NULL
+  ) +
+  theme_classic(base_size = 12) +
+  theme(legend.position = "bottom")
+print(p_auc)
+
+ggsave(
+  "RQ3_results/biomarker_effect_sizes.png",
+  p_auc,
+  width = 7.5,
+  height = 3.8,
+  dpi = 300
+)
+```
+
+## Do the biomarkers carry the same information?
+
+```{r}
+print(round(cor(
+  df[, names(biomarkers)],
+  method = "spearman",
+  use = "pairwise.complete.obs"
+), 2))
+
+print(cor.test(df$PDCD1, df$GEP, method = "spearman", exact = FALSE))
+print(cor.test(df$GEP, df$TMB, method = "spearman", exact = FALSE))
+```
+
+## Interpretation
+
+PDCD1 expression, the T-cell-inflamed GEP score, and TMB are all significantly higher in responders after FDR correction, with similar moderate effect sizes: AUCs of 0.72 (95% CI: 0.62–0.82) for PDCD1, 0.74 (0.63–0.84) for GEP, and 0.79 (0.68–0.90) for TMB.
+
+Because their confidence intervals overlap substantially, and results are consistent in the 150 complete-case patients, TMB has the highest point estimate, but the biomarkers cannot be ranked as clearly different in strength.
+
+Their correlations point to a split between shared RNA immune signal and distinct DNA antigenicity. Strong correlation between PDCD1 and GEP (Spearman ρ = 0.91) indicates that both largely reflect T-cell presence/activity on bulk RNA-seq, whereas the near-zero correlation between GEP and TMB (ρ = 0.09) shows that DNA mutational load captures a separate biological layer.
+
+**Limitations**: effect estimates are imprecise given only 25 responders (21 with TMB) and 42 missing TMB values. Comparing extreme response categories may also overstate separation relative to unselected patients, and these cohort-level associations do not establish causality or clinical predictive performance without independent validation.
+
+# Tumor Purity and Immune Biomarkers
+
+In this section, we investigate whether differences in tumor purity could influence the expression of immune-related biomarkers and partly explain their observed associations with treatment response.
+
+Tumor purity refers to the proportion of cancer cells in a tumor sample. Bulk RNA-sequencing measures gene expression from all cells in a sample, including cancer cells, immune cells and stromal cells. Consequently, the measured expression of immune-related genes may depend not only on their expression within individual cells but also on the cellular composition of the sample. This is particularly relevant for PDCD1 expression and the T-cell-inflamed GEP score, as both reflect immune-related activity. We therefore investigate whether tumor purity is associated with these biomarkers, whether it differs between responders and non-responders, and whether the observed biomarker associations with treatment response remain after an exploratory purity adjustment.
+
+```{r}
+PDCD1_rq4 <- as.numeric(tpm_mat["PDCD1", RQ2_results$sample_id])
+
+RQ4_data <- RQ2_results
+RQ4_data$PDCD1 <- PDCD1_rq4
+
+grep(
+  "purity|estimate|immune|stromal",
+  colnames(clinical_df),
+  ignore.case = TRUE,
+  value = TRUE
+)
+
+purity <- deconvolute_estimate(tpm_mat)
+
+purity_row <- grep(
+  "^TumorPurity$",
+  rownames(purity),
+  value = TRUE
+)
+
+stopifnot(length(purity_row) == 1)
+
+tumor_purity <- as.numeric(
+  unlist(purity[purity_row, , drop = FALSE], use.names = FALSE)
+)
+
+names(tumor_purity) <- colnames(purity)
+
+RQ4_data$TumorPurity <- tumor_purity[RQ4_data$sample_id]
+
+stopifnot(
+  !anyNA(RQ4_data$TumorPurity),
+  all(is.finite(RQ4_data$TumorPurity))
+)
+
+head(RQ4_data)
+summary(RQ4_data$TumorPurity)
+```
+
+ESTIMATE successfully produced tumor-purity estimates for the IMvigor210 samples. The median estimated tumor purity was 0.652, with values ranging from 0.299 to 0.959. This indicates substantial variation in tumor purity across the samples. Therefore, differences in cellular composition could potentially contribute to variation in the measured expression of immune-related biomarkers.
+
+## **Compare tumor purity between responders and non-responders**
+
+```{r}
+purity_Response_test <- wilcox.test(
+  TumorPurity ~ Response,
+  data = RQ4_data
+)
+
+purity_medians <- aggregate(
+  TumorPurity ~ Response,
+  data = RQ4_data,
+  median
+)
+
+print(purity_medians)
+purity_Response_test
+```
+
+```{r}
+plot_Response_boxplot <- function(data, variable, y_label, test_result) {
+  ggplot(data, aes(x = Response, y = .data[[variable]])) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(width = 0.12, alpha = 0.6) +
+    annotate(
+      "text",
+      x = Inf,
+      y = Inf,
+      label = paste0("p = ", signif(test_result$p.value, 3)),
+      hjust = 1.1,
+      vjust = 1.5
+    ) +
+    labs(
+      x = "Response class",
+      y = y_label
+    ) +
+    theme_minimal()
+}
+
+plot_Response_boxplot(
+  RQ4_data,
+  "TumorPurity",
+  "Estimated tumor purity",
+  purity_Response_test
+)
+```
+
+Median tumor purity was slightly higher in non-responders (0.656) than in responders (0.628). However, this difference was not statistically significant (Wilcoxon rank-sum test, p = 0.173). Therefore, we found no statistically significant evidence that tumor purity differed between the two response groups. This suggests that differences in overall tumor purity are unlikely to fully explain the higher immune-related biomarker expression observed in responders.
+
+## **Investigate the relationship between tumor purity and immune-related biomarkers**
+
+Although tumor purity did not differ significantly between responders and non-responders, it could still influence the expression of immune-related biomarkers within individual samples. To investigate this, we examined the associations between estimated tumor purity and PDCD1 expression and the T-cell-inflamed GEP score. Following Exercise 6, we used Spearman rank correlation, which measures the strength and direction of a monotonic relationship between two continuous variables.
+
+```{r}
+PDCD1_purity_cor <- cor.test(
+  RQ4_data$TumorPurity,
+  RQ4_data$PDCD1,
+  method = "spearman",
+  exact = FALSE,
+  use = "complete.obs"
+)
+
+PDCD1_purity_cor
+```
+
+```{r}
+GEP_purity_cor <- cor.test(
+  RQ4_data$TumorPurity,
+  RQ4_data$GEP_score,
+  method = "spearman",
+  exact = FALSE,
+  use = "complete.obs"
+)
+
+GEP_purity_cor
+```
+
+```{r}
+plot_association <- function(data, x, y, x_label, y_label, cor_test) {
+  rho <- unname(cor_test$estimate)
+
+  ggplot(data, aes(x = .data[[x]], y = .data[[y]])) +
+    geom_point(alpha = 0.7) +
+    geom_smooth(method = "lm", se = FALSE) +
+    annotate(
+      "text",
+      x = Inf,
+      y = Inf,
+      label = paste0(
+        "Spearman rho = ",
+        round(rho, 2),
+        "\np = ",
+        signif(cor_test$p.value, 3)
+      ),
+      hjust = 1.1,
+      vjust = 1.3
+    ) +
+    labs(
+      x = x_label,
+      y = y_label
+    ) +
+    theme_minimal()
+}
+
+plot_association(
+  RQ4_data,
+  "TumorPurity",
+  "PDCD1",
+  "Estimated tumor purity (ESTIMATE)",
+  "PDCD1 expression (TPM)",
+  PDCD1_purity_cor
+)
+
+plot_association(
+  RQ4_data,
+  "TumorPurity",
+  "GEP_score",
+  "Estimated tumor purity (ESTIMATE)",
+  "T-cell-inflamed GEP score (mean gene-wise z-score)",
+  GEP_purity_cor
+)
+```
+
+### Interpretation of the correlations
+
+Both PDCD1 expression and the T-cell-inflamed GEP score showed strong negative correlations with tumor purity. PDCD1 had a Spearman correlation coefficient of −0.691 (p = 1.35 × 10⁻²⁸), while GEP showed an even stronger negative correlation of −0.771 (p = 4.31 × 10⁻³⁹). This means that samples with higher tumor purity generally had lower PDCD1 expression and lower GEP scores. A possible biological explanation is that samples with lower tumor purity contain a larger proportion of non-tumor cells, including infiltrating immune cells. Since PDCD1 and many genes included in the GEP signature are associated with immune activity, a greater contribution from immune cells could increase their measured expression in bulk RNA-sequencing data. The stronger correlation observed for GEP may reflect that it combines information from multiple immune-related genes rather than relying on a single gene. However, we have not formally tested whether the two correlations differ significantly.
+
+These findings suggest that the cellular composition of tumor samples is strongly associated with the measured expression of both immune-related biomarkers. Tumor purity represents an important factor to consider when interpreting the associations observed in RQ2 and RQ3.
+
+## Adjust gene expression for tumor purity
+
+The strong associations between tumor purity and the immune-related biomarkers raises the question of whether the observed differences in the biomarkers between responders and non-responders could partly be explained by tumor purity. To investigate this, we performed an exploratory sensitivity analysis using the `removeBatchEffect()` function from the limma package, following the approach introduced in the course.
+
+```{r}
+tpm_rq4 <- tpm_mat[, RQ4_data$sample_id, drop = FALSE]
+
+stopifnot(identical(
+  colnames(tpm_rq4),
+  RQ4_data$sample_id
+))
+
+expr_log <- log2(tpm_rq4 + 1)
+
+# Adjust gene expression for tumor purity
+expr_adjusted <- removeBatchEffect(
+  expr_log,
+  covariates = matrix(RQ4_data$TumorPurity, ncol = 1)
+)
+
+# Extract adjusted PDCD1 expression
+PDCD1_adjusted <- as.numeric(
+  expr_adjusted["PDCD1", ]
+)
+
+# Extract GEP genes
+stopifnot(all(GEP_genes %in% rownames(expr_adjusted)))
+
+GEP_expr_adjusted <- expr_adjusted[
+  GEP_genes,
+  ,
+  drop = FALSE
+]
+
+# Scale each gene across samples
+adjusted_gene_sd <- apply(GEP_expr_adjusted, 1, sd)
+
+stopifnot(
+  all(is.finite(adjusted_gene_sd)),
+  all(adjusted_gene_sd > 0)
+)
+
+GEP_expr_adjusted_scaled <- t(
+  scale(t(GEP_expr_adjusted))
+)
+
+# Calculate adjusted GEP score
+GEP_scores_adjusted <- colMeans(
+  GEP_expr_adjusted_scaled,
+  na.rm = TRUE
+)
+
+# Create adjusted dataset
+RQ4_adjusted <- RQ4_data
+RQ4_adjusted$PDCD1 <- PDCD1_adjusted
+RQ4_adjusted$GEP_score <- GEP_scores_adjusted
+
+stopifnot(identical(
+  colnames(expr_adjusted),
+  RQ4_adjusted$sample_id
+))
+
+head(RQ4_adjusted)
+```
+
+```{r}
+PDCD1_Response_adjusted_test <- wilcox.test(
+  PDCD1 ~ Response,
+  data = RQ4_adjusted
+)
+
+GEP_Response_adjusted_test <- wilcox.test(
+  GEP_score ~ Response,
+  data = RQ4_adjusted
+)
+
+PDCD1_Response_adjusted_test
+GEP_Response_adjusted_test
+```
+
+```{r}
+plot_Response_boxplot(
+  RQ4_adjusted,
+  "PDCD1",
+  "Purity-adjusted PDCD1 expression",
+  PDCD1_Response_adjusted_test
+)
+
+plot_Response_boxplot(
+  RQ4_adjusted,
+  "GEP_score",
+  "Purity-adjusted T-cell-inflamed GEP score",
+  GEP_Response_adjusted_test
+)
+```
+
+```{r}
+RQ4_data$PDCD1_log <- as.numeric(
+  expr_log["PDCD1", RQ4_data$sample_id]
+)
+
+PDCD1_before_test <- wilcox.test(
+  PDCD1_log ~ Response,
+  data = RQ4_data
+)
+
+GEP_before_test <- wilcox.test(
+  GEP_score ~ Response,
+  data = RQ4_data
+)
+
+PDCD1_before <- aggregate(
+  PDCD1_log ~ Response,
+  RQ4_data,
+  median
+)
+
+GEP_before <- aggregate(
+  GEP_score ~ Response,
+  RQ4_data,
+  median
+)
+
+PDCD1_after <- aggregate(
+  PDCD1 ~ Response,
+  RQ4_adjusted,
+  median
+)
+
+GEP_after <- aggregate(
+  GEP_score ~ Response,
+  RQ4_adjusted,
+  median
+)
+
+PDCD1_before
+PDCD1_after
+
+GEP_before
+GEP_after
+
+PDCD1_before_test
+GEP_before_test
+```
+
+### Comparison before and after tumor-purity adjustment
+
+Before adjustment, PDCD1 expression was significantly higher in responders than in non-responders (median 1.197 compared with 0.590, Wilcoxon p = 0.000396). After adjustment, the difference remained statistically significant, with median values of 2.797 in responders and 2.540 in non-responders (p = 0.00166).
+
+Similarly, the GEP score was significantly higher in responders before adjustment (median 0.671 compared with −0.083, p = 0.000137). After adjustment, responders still had higher GEP scores (median 0.531 compared with −0.149, p = 0.0000208). Interestingly, although the difference between the GEP group medians became slightly smaller after adjustment, the p-value decreased. This is possible because the Wilcoxon test considers the overall ranking of observations rather than only the difference between medians.
+
+Overall, both biomarkers remained significantly different between responders and non-responders after the exploratory purity adjustment. This suggests that the observed response-associated differences are not entirely removed by accounting for the linear component of gene expression associated with tumor purity.
+
+However, this adjustment does not establish that the biomarkers are independently associated with treatment response, as other biological and clinical factors may also contribute to the observed differences.
+
+## Discussion and limitations
+
+Our results demonstrate that tumor purity is strongly associated with the expression of immune-related biomarkers measured using bulk RNA-sequencing. Both PDCD1 expression and the T-cell-inflamed GEP score showed strong negative correlations with estimated tumor purity. This suggests that differences in cellular composition can influence the measured expression of these biomarkers.
+
+However, we found no statistically significant difference in tumor purity between responders and non-responders. Furthermore, both biomarkers remained significantly different between the response groups after our exploratory purity adjustment. This suggests that tumor purity may contribute to variation in biomarker expression but does not fully explain the observed associations with treatment response.
+
+**Should tumor purity always be adjusted for?**
+
+Not necessarily. Tumor purity represents biological variation in the tumor microenvironment rather than simply unwanted technical variation. In particular, immune-cell infiltration may itself be important for the effectiveness of immune checkpoint inhibitors. Adjusting for tumor purity could therefore remove not only variation associated with cellular composition but also biologically meaningful information about the immune environment. Whether adjustment is appropriate depends on the biological question being investigated. If the aim is to understand the immune environment of the entire tumor, removing this variation may be undesirable. However, if the aim is to investigate expression independently of differences in cellular composition, adjustment may provide additional insight.
+
+Our analysis also has several limitations. First, tumor purity was estimated using ESTIMATE rather than measured directly, meaning that the estimates depend on gene-expression signatures. Second, `removeBatchEffect()` removes the linear component associated with tumor purity and does not account for all possible relationships between cellular composition and gene expression. The adjustment should therefore be interpreted as an exploratory sensitivity analysis rather than proof that we have isolated the independent biological effect of each biomarker. In addition, the analysis does not account for other potential confounding factors, such as differences in clinical characteristics or other components of the tumor microenvironment.
+
+**Summary** of the main findings:
+
+| Analysis                | Result        | Interpretation              |
+|-------------------------|---------------|-----------------------------|
+| Purity: NR vs R         | p = 0.173     | Not significant             |
+| Purity vs PDCD1         | rho = −0.691  | Strong negative correlation |
+| Purity vs GEP           | rho = −0.771  | Strong negative correlation |
+| PDCD1 before adjustment | p = 0.000396  | Significant                 |
+| PDCD1 after adjustment  | p = 0.00166   | Still significant           |
+| GEP before adjustment   | p = 0.000137  | Significant                 |
+| GEP after adjustment    | p = 0.0000208 | Still significant           |
+
+## Conclusion
+
+Our findings suggest that tumor purity is an important factor when interpreting immune-related biomarkers measured using bulk RNA-sequencing. Both PDCD1 expression and the T-cell-inflamed GEP score showed strong negative correlations with estimated tumor purity, indicating that their measured expression is associated with the cellular composition of tumor samples. Tumor purity did not differ significantly between responders and non-responders, and both biomarkers remained significantly different between the response groups after our exploratory purity adjustment. This suggests that tumor purity does not fully explain the observed associations between these biomarkers and treatment response. Adjusting for tumor purity does not necessarily improve interpretation, since immune-cell infiltration is itself biologically meaningful and may contribute to treatment response. Tumor purity should be considered when interpreting immune-related biomarkers, but its adjustment should depend on the biological question being investigated.
+
+# **Limitations of the analysis**
+
+Several limitations should be considered when interpreting the differential gene expression and GSEA results:
+
+-   **Potential confounding factors:** differences in age, sex, disease stage, previous treatments and other clinical characteristics may influence both gene expression and treatment response. If these variables are not included in the DESeq2 design, their effects cannot be separated from those associated with treatment response.
+
+-   **Technical variability:** differences in sample preparation, sequencing depth, RNA quality and batch effects may introduce unwanted variation into the data.
+
+-   **Size of the groups:** there is a big difference in the number of responders (25) and non-responders (167)
+
+**Why differential expression does not imply causation**
+
+Differential expression identifies statistical associations between gene expression and treatment response but does not establish a causal relationship. The observed expression differences may contribute to treatment response, result from other underlying biological processes or reflect confounding factors rather than directly influencing treatment efficacy.
