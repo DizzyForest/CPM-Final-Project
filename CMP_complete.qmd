@@ -81,7 +81,13 @@ counts_samples <- unique(colnames(counts_df))
 length(counts_samples)
 ```
 
-There is no overlap.
+There are this many unique sample IDs
+
+```{r}
+length(colnames(counts_df)) == length(unique(colnames(counts_df)))
+```
+
+There is no duplicate IDs.
 
 ## Explore the data
 
@@ -428,7 +434,7 @@ com_plot3 <- grid.arrange(p1_non_zero, p2_non_zero, p3_non_zero, p4_non_zero, nc
 ## Log2 transform
 
 ```{r}
-## We center the log2-transformed FPKM data but do not scale genes to
+## We center the log2-transformed TPM data but do not scale genes to
 ## unit variance. Log2 transformation already reduces large expression
 ## differences, and scaling it again, would give all the genes
 ## equal variance, giving low-variance or noisy genes too much influence on PCA.
@@ -451,7 +457,7 @@ tpm_counts_pca <- tpm_df_logt[keep_count, ]
 pca_count <- prcomp(
   t(tpm_counts_pca),
   center = TRUE,
-  scale. = TRUE
+  scale. = FALSE
 )
 ```
 
@@ -532,6 +538,8 @@ The responders (R) and non-responders (NR) largely overlap, without clear separa
 This suggests that treatment response is not clearly associated with the dominant patterns of gene expression variation captured by these two components. However, response-associated differences may still exist in other principal components or individual genes.
 
 # Differential Gene Expression Analysis (DESeq2)
+
+Raw data are used for the DESeq2 analysis because DESeq2 uses its own normalization.
 
 ## Prepare sample metadata
 
@@ -645,6 +653,10 @@ summary(res4)
 res_sig4 <- results(dds_after_deseq4, alpha = 0.05)
 summary(res_sig4)
 ```
+
+We examined two adjusted p-value significance thresholds, **0.10 and 0.05**, for each prefiltering strategy. The default threshold of 0.10 provides a more permissive criterion, while 0.05 is more stringent and reduces the expected proportion of false discoveries.
+
+We used `alpha = 0.05` for our final comparison of significant DEGs across the different prefiltering strategies.
 
 ## Interpretation of values with the treshold: p-value\<0.05 for the main setting
 
@@ -1140,6 +1152,16 @@ This plot summarizes the five representative biological processes enriched in ea
 The positive NES values indicate enrichment towards Responders, mainly involving DNA repair and cell cycle-related processes, while the negative NES values indicate enrichment towards Non-responders, mainly involving tissue development, biological adhesion, and vascular development.
 
 This highlights two distinct biological expression patterns associated with treatment response.
+
+Nominal p-values (`pval`) were used to select pathways for the GSEA table and `collapsePathways()` as part of a more exploratory analysis.
+
+Unlike adjusted p-values (`padj`), nominal p-values do not account for multiple testing. Using them allows us to consider a broader set of potentially enriched pathways.
+
+For the GSEA table, pathways were ranked by their nominal p-values to highlight the strongest enrichment signals in both directions. For `collapsePathways()`, the broader selection allows more pathways to be compared for redundancy and helps identify representative biological processes.
+
+However, `padj` accounts for multiple testing and is used to control the false discovery rate (FDR), reducing the risk of false-positive findings.
+
+Therefore, the top five enriched pathways were selected based on `padj` to prioritize statistically significant results after multiple-testing correction.
 
 # T-Cell-Inflamed Gene Expression Signature (GEP & ssGSEA)
 
